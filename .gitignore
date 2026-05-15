@@ -1,0 +1,31 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+
+# --- runtime artifacts ---
+*.pid
+trades.db
+trades.db-*
+logs/
+
+# --- python ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# --- node / vite ---
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# --- raw research dumps (keep .md reports + .py scripts) ---
+research/bonereader_raw/
+research/*.log
+research/*.json
+
+# --- macOS ---
+.DS_Store
+bot.mode
