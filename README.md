@@ -120,19 +120,35 @@ grep ^WALLET_ADDRESS .env       # your bot wallet
 
 ### 3. Fund the bot wallet on Polygon
 
-Withdraw to `WALLET_ADDRESS` (from the previous step) on **Polygon**:
+You're sending two tokens from an exchange (or another wallet) **to** your
+bot's `WALLET_ADDRESS` (the `0x...` you got in step 2), on the **Polygon**
+network:
 
-- **USDC.e** — `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174` — $30+ to start.
-- **MATIC** — about 1 is plenty for setup + months of trading gas.
+| token | amount | what it's for |
+|---|---|---|
+| **MATIC** (sometimes shown as POL) | ~1 | gas — pays for setup + months of trading |
+| **USDC.e** | $30+ | trading collateral |
 
-After your withdrawal confirms (usually 1–3 minutes), check:
+**On the exchange's withdrawal form:**
+
+- **Destination address:** your `WALLET_ADDRESS` from step 2.
+  Verify with: `grep ^WALLET_ADDRESS .env`
+- **Network:** Polygon (not Ethereum, not BSC, not anything else).
+- **Token:** MATIC for the first withdrawal, USDC.e for the second.
+
+> **About `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`** — this is the
+> **USDC.e token contract** on Polygon, NOT a destination. Some exchanges
+> ask you to confirm the token contract; if so, paste this. **Never send
+> funds to this address** — that would lose them.
+
+After your withdrawals confirm (usually 1–3 minutes), check:
 
 ```bash
 .venv/bin/python scripts/check_balance.py
 ```
 
-If both balances show, you're good. If they're zero, the withdrawal hasn't
-arrived yet — wait a minute and re-run.
+If both balances show up, you're good. If they're zero, the withdrawal
+hasn't arrived yet — wait a minute and re-run.
 
 ### 4. Import the bot wallet into MetaMask
 
