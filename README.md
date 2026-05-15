@@ -18,24 +18,23 @@ risky action has a kill switch, and every setup step is a one-line script.
 ## Quick orientation — what you'll do
 
 ```
- 1. install deps                  (5 min)
- 2. generate a fresh bot wallet   (10 sec)
- 3. fund it with MATIC + USDC.e   (5 min)
- 4. import wallet into MetaMask   (1 min)
- 5. log into polymarket.com       (2 min)  -- deploys your "deposit wallet"
- 6. wrap USDC.e -> pUSD           (1 min)
- 7. move pUSD to deposit wallet   (1 min)
- 8. derive API credentials        (10 sec)
- 9. verify setup                  (5 sec)
-10. launch dashboard + bot        (10 sec)
+1. install deps                       (5 min)
+2. create a new account in MetaMask   (30 sec)
+3. log into polymarket.com with it    (1 min)  -- deposit wallet deploys
+4. deposit USDC.e via Polymarket UI   (5 min)
+5. export private key from MetaMask
+   and import into the bot's .env     (30 sec)
+6. derive API credentials             (10 sec)
+7. verify setup                       (5 sec)
+8. launch dashboard + bot             (10 sec)
 ```
 
-End-to-end: ~30 minutes if everything goes smoothly.
+End-to-end: ~15 minutes if everything goes smoothly.
 
-> **Want to try it without funding a wallet?** Skip to step 9 once
-> `verify_setup.py` complains. Then run `scripts/run_paper.sh` — the bot
-> watches live markets and logs decisions but never places real orders.
-> Useful for learning what the bot does before risking money.
+> **Want to try it without funding a wallet?** Run
+> `scripts/run_paper.sh` — the bot watches live markets and logs decisions
+> but never places real orders. Useful for learning what the bot does
+> before risking money.
 
 ## Heads up before you start
 
@@ -83,8 +82,8 @@ via [app.polygon.technology](https://app.polygon.technology/).
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-user>/polybot_beginner
-cd polybot_beginner
+git clone https://github.com/<your-user>/polymarket_bot_beginner
+cd polymarket_bot_beginner
 
 # Python venv + deps
 python3.11 -m venv .venv
@@ -94,130 +93,76 @@ python3.11 -m venv .venv
 cd ui && npm install && cd ..
 ```
 
-### 2. Generate a fresh trading wallet
+### 2. Create a new account in MetaMask
 
-```bash
-.venv/bin/python scripts/generate_wallet.py
-```
+You'll do the wallet creation, the Polymarket registration, **and** the
+funding all inside MetaMask + polymarket.com — no terminal yet.
 
-This creates `.env` (file mode 600 — only readable by you) with a brand-new
-private key, address, and sensible defaults. The script refuses to
-overwrite an existing `.env`, so a funded key can't be wiped by accident.
+1. Open MetaMask → account menu (top-right circle) → **Add account or
+   hardware wallet** → **Add a new account**.
+2. Name it something obvious like *polybot*.
+3. Switch to that new account in MetaMask.
 
-> You don't hand-edit `.env` (or `.env.example`). Every value is written by
-> a script later in this walkthrough.
+> **Why a dedicated account?** Trading bots should run with a wallet that
+> holds nothing else. If the bot has a bug or the key leaks later, only
+> the bot's small balance is at risk — not your main wallet.
 
-> **Why a fresh wallet?** Trading bots should run with a dedicated wallet,
-> never your main account. If the bot has a bug or the key leaks, only this
-> wallet is at risk. Funding it small ($30) caps your downside while
-> learning.
-
-Verify the file:
-
-```bash
-grep ^WALLET_ADDRESS .env       # your bot wallet
-```
-
-### 3. Fund the bot wallet on Polygon
-
-You're sending two tokens from an exchange (or another wallet) **to** your
-bot's `WALLET_ADDRESS` (the `0x...` you got in step 2), on the **Polygon**
-network:
-
-| token | amount | what it's for |
-|---|---|---|
-| **MATIC** (sometimes shown as POL) | ~1 | gas — pays for setup + months of trading |
-| **USDC.e** | $30+ | trading collateral |
-
-**On the exchange's withdrawal form:**
-
-- **Destination address:** your `WALLET_ADDRESS` from step 2.
-  Verify with: `grep ^WALLET_ADDRESS .env`
-- **Network:** Polygon (not Ethereum, not BSC, not anything else).
-- **Token:** MATIC for the first withdrawal, USDC.e for the second.
-
-> **About `0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174`** — this is the
-> **USDC.e token contract** on Polygon, NOT a destination. Some exchanges
-> ask you to confirm the token contract; if so, paste this. **Never send
-> funds to this address** — that would lose them.
-
-After your withdrawals confirm (usually 1–3 minutes), check:
-
-```bash
-.venv/bin/python scripts/check_balance.py
-```
-
-If both balances show up, you're good. If they're zero, the withdrawal
-hasn't arrived yet — wait a minute and re-run.
-
-### 4. Import the bot wallet into MetaMask
-
-This is **only used for the one-time Polymarket registration** in the next
-step. After that you can remove the account from MetaMask if you like — the
-bot reads the key from `.env` directly.
-
-1. Grab the private key:
-   ```bash
-   grep ^PRIVATE_KEY .env
-   ```
-2. MetaMask → account menu (top-right circle) → **Add account or hardware
-   wallet** → **Import account** → paste the private key.
-3. **Verify** the imported account address matches your `WALLET_ADDRESS`
-   from `.env`. If it doesn't, you imported the wrong key — stop and
-   start over.
-
-### 5. Register the bot wallet on Polymarket
-
-Polymarket V2 doesn't let raw wallets trade directly. Instead, your wallet
-needs a **deposit wallet** — a smart-contract wallet that your account
-signs orders for. The simplest way to get one deployed is to sign into
-polymarket.com once with your bot wallet.
+### 3. Sign into polymarket.com with the new account
 
 1. **Log out** of any existing polymarket.com session first (avatar →
-   Logout).
+   Logout) so the wrong account doesn't auto-connect.
 2. Open polymarket.com → **Log In** → choose **MetaMask**.
    If you don't have a Polymarket account yet, sign up via my referral
    link — it helps support this project at no cost to you:
    [polymarket.com/?r=allaboutai](https://polymarket.com/?r=allaboutai).
-3. In the MetaMask popup, **double-check** the connected account is your
-   `WALLET_ADDRESS` (from `.env`), then sign the auth message.
-4. Polymarket auto-deploys your deposit wallet (no gas needed — they
-   sponsor it).
-5. Click your avatar (top right) → **Wallet** → copy the deposit address.
-   It starts with `0x` and is *different* from your EOA.
+3. **Verify** the MetaMask popup shows the *polybot* account you just
+   created, then sign the auth message.
+4. Polymarket auto-deploys a **deposit wallet** for you (no gas needed —
+   they sponsor it). This is the smart-contract wallet your bot will
+   trade from.
 
-> **Critical gotcha:** if you sign in with a different MetaMask account by
-> mistake, the deposit wallet will belong to *that* account and your bot
-> won't be able to sign for it. The migration script (next step) checks
-> ownership and refuses to send funds if there's a mismatch.
+### 4. Deposit funds via the Polymarket UI
 
-### 6. Wrap USDC.e to pUSD
+Easiest path for beginners — Polymarket's UI handles the on-chain plumbing
+(USDC.e → pUSD wrap, deposit-wallet routing) for you.
 
-Polymarket V2 settles in pUSD (a 1:1 wrapper around USDC.e). Wrap it:
+1. On polymarket.com → avatar → **Deposit**.
+2. Pick **Polygon · USDC.e** as the source asset and follow the
+   instructions to send from your exchange. Start with **$30+**.
+3. **On the exchange's withdrawal form:**
+   - **Destination address:** the one Polymarket showed you in the
+     deposit modal.
+   - **Network:** **Polygon** (not Ethereum, not BSC).
+   - **Token:** USDC.e (sometimes labeled just "USDC" on Polygon).
+4. The deposit usually shows up on Polymarket within 1–3 minutes.
 
-```bash
-.venv/bin/python scripts/wrap_to_pusd.py
-```
+> You do **not** need MATIC in this wallet. Polymarket sponsors gas for the
+> deposit wallet's trades. (If you ever want to *withdraw* directly
+> on-chain you'll need a tiny bit, but you can grab that later.)
 
-This is idempotent — safe to re-run if anything fails midway.
+### 5. Import the wallet into the bot
 
-### 7. Move pUSD into the deposit wallet
+Now extract the private key from MetaMask and hand it to the bot. The bot
+needs the private key to sign orders; MetaMask was just for setup.
 
-Use the deposit address you copied from polymarket.com:
+1. In MetaMask, with the *polybot* account selected → **⋮** menu (account
+   details) → **Show private key**. Enter your MetaMask password, copy
+   the key (starts with `0x`, 64 hex chars).
+2. Run:
+   ```bash
+   .venv/bin/python scripts/import_wallet.py 0xYOUR_PRIVATE_KEY
+   ```
+   The script:
+   - validates the key, derives the address,
+   - **scans the on-chain DepositWalletFactory** to find the deposit
+     wallet Polymarket deployed for you in step 3,
+   - writes `.env` with `SIGNATURE_TYPE=3` and `FUNDER_ADDRESS=<deposit>`.
 
-```bash
-.venv/bin/python scripts/migrate_to_deposit_wallet.py 0xYOUR_DEPOSIT_ADDRESS
-```
+> **Security note:** once `.env` has the key, you can safely remove the
+> *polybot* account from MetaMask if you like. The bot reads everything
+> from `.env`.
 
-The script:
-- verifies the address has contract code (refuses to send funds to a plain
-  EOA by mistake)
-- verifies its `owner()` is your bot EOA (catches the wrong-MetaMask-account
-  mistake from step 5)
-- transfers all your pUSD from the EOA into the deposit wallet
-- updates `.env`: sets `FUNDER_ADDRESS=<deposit>` and `SIGNATURE_TYPE=3`
-
-### 8. Derive L2 API credentials
+### 6. Derive L2 API credentials
 
 ```bash
 .venv/bin/python scripts/derive_api_creds.py
@@ -225,7 +170,7 @@ The script:
 
 The bot uses these to authenticate every order. Stored in `.env`.
 
-### 9. Verify the whole setup
+### 7. Verify the whole setup
 
 ```bash
 .venv/bin/python scripts/verify_setup.py
@@ -234,6 +179,22 @@ The bot uses these to authenticate every order. Stored in `.env`.
 Walks through every check (wallet, balance, deposit wallet ownership,
 allowances, API auth) and prints `[ OK ]` / `[FAIL]` for each. If anything
 fails, the script tells you exactly what to do.
+
+---
+
+### Alternative path: terminal-only
+
+If you'd rather not use MetaMask at all and prefer to run everything from
+the terminal:
+
+1. `scripts/generate_wallet.py` — creates a fresh random wallet in `.env`.
+2. Fund the EOA with USDC.e **and** ~1 MATIC for gas.
+3. Import the same key into MetaMask **just to register on polymarket.com**
+   (steps 3 & 4 above, but use *Import account* with the key from `.env`).
+4. `scripts/wrap_to_pusd.py` — wraps your USDC.e to pUSD.
+5. `scripts/migrate_to_deposit_wallet.py 0xYOUR_DEPOSIT_ADDRESS` — moves
+   pUSD into the deposit wallet you got from polymarket.com.
+6. Continue from step 6 above.
 
 ---
 
