@@ -109,6 +109,11 @@ cd ui && npm install && cd ..
 You'll do the wallet creation, the Polymarket registration, **and** the
 funding all inside MetaMask + polymarket.com — no terminal yet.
 
+Don't have MetaMask yet? Install the browser extension from
+**[metamask.io/download](https://metamask.io/download/)** (avoid any other
+source — fake MetaMask extensions are a common scam). Set up a fresh
+MetaMask if you don't already have one, then come back here.
+
 1. Open MetaMask → account menu (top-right circle) → **Add account or
    hardware wallet** → **+ Ethereum account**.
 2. Name it something obvious like *polybot*.
