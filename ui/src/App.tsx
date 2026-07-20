@@ -92,7 +92,10 @@ export default function App() {
           </div>
 
           <div style={colStack}>
-            <Panel title={m ? `LIVE MARKET · ${m.market_slug}` : 'NO LIVE MARKET'}>
+            <Panel
+              title={m ? `LIVE MARKET · ${m.market_slug}` : 'NO LIVE MARKET'}
+              titleHref={m ? `https://polymarket.com/event/${m.market_slug}` : undefined}
+            >
               {m ? (
                 <>
                   <Row
@@ -225,8 +228,8 @@ function BottomBar({ state }: { state: State | null }) {
 }
 
 function Panel({
-  title, children, flex,
-}: { title: string; children: ReactNode; flex?: boolean }) {
+  title, children, flex, titleHref,
+}: { title: string; children: ReactNode; flex?: boolean; titleHref?: string }) {
   return (
     <div style={{
       border: '1px solid var(--border)',
@@ -236,7 +239,26 @@ function Panel({
       flex: flex ? 1 : 'unset',
       minHeight: 0,
     }}>
-      <div style={panelTitleStyle}>{title}</div>
+      <div style={panelTitleStyle}>
+        {title}
+        {titleHref && (
+          <a
+            href={titleHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open this market on Polymarket"
+            style={{
+              marginLeft: 10,
+              color: 'var(--amber)',
+              textDecoration: 'none',
+              borderBottom: '1px dotted var(--amber)',
+              fontWeight: 400,
+            }}
+          >
+            OPEN ON POLYMARKET ↗
+          </a>
+        )}
+      </div>
       <div style={{ padding: '6px 10px', flex: flex ? 1 : 'unset', overflow: 'auto' }}>
         {children}
       </div>
@@ -535,10 +557,15 @@ function SimPositionsTable({ positions }: { positions: SimPosition[] }) {
             <Td bold color={p.side === 'UP' ? 'var(--green)' : 'var(--red)'}>{p.side}</Td>
             <Td right>{fmtNum(p.shares, 0)}</Td>
             <Td right>{fmtPx(p.avg_price)}</Td>
-            <Td right dim={p.mark_source === 'cost'}>{fmtPx(p.mark_price)}</Td>
+            {/* A position whose own 5-min window has closed has no live price.
+                Showing a mark from whatever market is live NOW would be
+                meaningless — it belongs to a different market entirely. */}
+            <Td right dim>{p.pending ? '—' : fmtPx(p.mark_price)}</Td>
             <Td right>{fmtUsd(p.cost)}</Td>
-            <Td right bold color={p.unrealized >= 0 ? 'var(--green)' : 'var(--red)'}>
-              {p.unrealized >= 0 ? '+' : ''}{fmtUsd(p.unrealized)}
+            <Td right bold={!p.pending} color={p.pending ? 'var(--amber)' : (p.unrealized >= 0 ? 'var(--green)' : 'var(--red)')}>
+              {p.pending
+                ? 'AWAITING RESOLUTION'
+                : `${p.unrealized >= 0 ? '+' : ''}${fmtUsd(p.unrealized)}`}
             </Td>
           </tr>
         ))}

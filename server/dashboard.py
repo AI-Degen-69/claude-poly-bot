@@ -141,20 +141,45 @@ def _sim_positions_marked(market: Optional[dict]) -> list[dict]:
     """
     rows = store.sim_open_positions()
     bu, bd = _state.get("book_up"), _state.get("book_down")
+    now = time.time()
     for p in rows:
-        mark_px = None
-        if market and p["condition_id"] == market.get("condition_id"):
+        # A position's own window ends 300s after the ts encoded in its slug.
+        # Once that passes, the outcome is decided and only the resolver is
+        # outstanding -- there is no live price for it any more. Marking it
+        # against whatever market happens to be live now would be nonsense:
+        # a different market's book has nothing to do with this position.
+        window_end = None
+        try:
+            window_end = int(p["market_slug"].rsplit("-", 1)[1]) + 300
+        except Exception:
+            pass
+        is_live = (
+            market is not None
+            and p["condition_id"] == market.get("condition_id")
+            and window_end is not None
+            and now < window_end
+        )
+
+        if is_live:
             book = bu if p["side"] == "UP" else bd
-            if book:
-                mark_px = book.get("best_bid")
-        if mark_px is None:
-            mark_px = p["avg_price"]        # stale window: hold at cost
-            p["mark_source"] = "cost"
-        else:
-            p["mark_source"] = "book"
-        p["mark_price"] = mark_px
-        p["value"] = p["shares"] * mark_px
-        p["unrealized"] = p["value"] - (p["cost"] + p["fees"])
+            mark_px = book.get("best_bid") if book else None
+            if mark_px is not None:
+                p["mark_source"] = "book"
+                p["mark_price"] = mark_px
+                p["value"] = p["shares"] * mark_px
+                p["unrealized"] = p["value"] - (p["cost"] + p["fees"])
+                p["pending"] = False
+                continue
+
+        # Closed (or no quote): freeze at cost and flag as awaiting settlement.
+        # Unrealized is 0 by definition -- the position is worth what we paid
+        # until the resolver tells us whether it paid $1.00 or $0.00.
+        p["mark_source"] = "pending"
+        p["mark_price"] = None
+        p["value"] = p["cost"] + p["fees"]
+        p["unrealized"] = 0.0
+        p["pending"] = True
+        p["closed_secs_ago"] = (now - window_end) if window_end else None
     return rows
 
 

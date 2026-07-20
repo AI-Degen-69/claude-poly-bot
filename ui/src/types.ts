@@ -147,10 +147,12 @@ export interface SimPosition {
   fees: number;
   fills: number;
   avg_price: number;
-  mark_price: number;
+  mark_price: number | null;
   mark_source: string;
   value: number;
   unrealized: number;
+  pending?: boolean;
+  closed_secs_ago?: number | null;
 }
 
 export interface Settlement {
