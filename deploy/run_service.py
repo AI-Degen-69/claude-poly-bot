@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Container entrypoint: supervise the paper bot + serve the dashboard.
+
+One long-lived process for Railway/Fly/Render. Adapted from the previous
+deploy's run_bots.py, simplified to a single bot profile (this repo runs one
+strategy, not an A/B set) and hardened with:
+
+  - a startup preflight that FAILS LOUDLY on the two silent-killer misconfigs
+    (Binance geo-block, TURSO_URL set but libsql missing)
+  - a daily prune of the `decisions` table (~30k rows/day)
+  - bot restart with backoff if it dies
+
+Env:
+  TURSO_URL / TURSO_TOKEN   remote libSQL; omit to use local sqlite
+  POLYBOT_DB                local sqlite path (use a mounted volume!)
+  PORT                      dashboard port (host injects this)
+  SIM_ONLY                  must stay "1"; guards against arming a hosted box
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+PORT = int(os.environ.get("PORT", "8787"))
+RESTART_BACKOFF = 5.0
+
+
+def preflight() -> None:
+    """Fail loudly on misconfigurations that would otherwise look healthy.
+
+    Both of these produce a green healthcheck and silently useless data, which
+    is the worst possible failure mode for an unattended collector.
+    """
+    problems: list[str] = []
+
+    # 1. Storage. TURSO_URL set but libsql missing means we quietly write to a
+    #    container-local file that vanishes on the next redeploy.
+    from bot import store
+    print(f"[preflight] storage backend: {store.backend_name()}", flush=True)
+    if os.environ.get("TURSO_URL") and not store.USE_TURSO:
+        problems.append(
+            "TURSO_URL is set but libsql is not importable -- data would be "
+            "written to an ephemeral local file and lost on redeploy."
+        )
+    if not os.environ.get("TURSO_URL") and not os.environ.get("POLYBOT_DB"):
+        print("[preflight] WARNING: no TURSO_URL and no POLYBOT_DB -- using a "
+              "container-local trades.db, which is LOST on redeploy unless a "
+              "volume is mounted.", flush=True)
+
+    # 2. Binance reachability. The spot gate IS the strategy; if Binance geo-
+    #    blocks this region the gate fails closed and we collect zero fills
+    #    forever while looking perfectly healthy.
+    import requests
+    try:
+        r = requests.get("https://api.binance.com/api/v3/ticker/price",
+                         params={"symbol": "BTCUSDT"}, timeout=15)
+        if r.status_code == 200:
+            print(f"[preflight] binance OK: BTC={r.json().get('price')}", flush=True)
+        else:
+            problems.append(
+                f"Binance returned HTTP {r.status_code} (451/403 = geo-blocked "
+                f"region, e.g. US). Redeploy in a non-US region or the spot "
+                f"gate will reject every trade."
+            )
+    except Exception as e:
+        problems.append(f"Binance unreachable: {e}")
+
+    # 3. Polymarket reachability.
+    try:
+        from bot.config import load
+        from bot.markets import fetch_live_market
+        cfg = load()
+        m = fetch_live_market(cfg.gamma_host, cfg.series_slug)
+        print(f"[preflight] polymarket OK: live market={m.market_slug if m else None}",
+              flush=True)
+        if not cfg.sim_only:
+            problems.append("sim_only is False -- refusing to run a hosted box "
+                            "that could place real orders.")
+    except Exception as e:
+        problems.append(f"Polymarket unreachable: {e}")
+
+    if problems:
+        print("\n[preflight] FAILED:", flush=True)
+        for p in problems:
+            print(f"  - {p}", flush=True)
+        sys.exit(1)
+    print("[preflight] all checks passed", flush=True)
+
+
+def prune_loop() -> None:
+    """Drop decisions older than 30d, once a day. orders/resolutions kept."""
+    from bot import store
+    while True:
+        time.sleep(86400)
+        try:
+            n = store.prune_decisions(30.0)
+            print(f"[prune] removed {n} old decision rows", flush=True)
+        except Exception as e:
+            print(f"[prune] failed: {e}", flush=True)
+
+
+def run_bot() -> None:
+    """Run the paper bot, restarting it if it exits."""
+    env = dict(os.environ, PYTHONPATH=str(ROOT))
+    while True:
+        print("[bot] starting (paper/sim)", flush=True)
+        # No --live. Ever. This container has placeholder credentials.
+        proc = subprocess.Popen([sys.executable, "-m", "bot.main"],
+                                cwd=str(ROOT), env=env)
+        code = proc.wait()
+        print(f"[bot] exited code={code}; restarting in {RESTART_BACKOFF}s", flush=True)
+        time.sleep(RESTART_BACKOFF)
+
+
+def main() -> None:
+    # `--preflight` runs the checks and exits: use it to validate a host's
+    # region/config before committing to a full deploy.
+    if "--preflight" in sys.argv:
+        preflight()
+        return
+    preflight()
+    threading.Thread(target=run_bot, name="bot", daemon=True).start()
+    threading.Thread(target=prune_loop, name="prune", daemon=True).start()
+
+    import uvicorn
+    print(f"[dashboard] serving on 0.0.0.0:{PORT}", flush=True)
+    uvicorn.run("server.dashboard:app", host="0.0.0.0", port=PORT, log_level="info")
+
+
+if __name__ == "__main__":
+    main()

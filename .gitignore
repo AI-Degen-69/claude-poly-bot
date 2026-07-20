@@ -2,11 +2,16 @@
 .env
 .env.*
 !.env.example
+# Deploy reference: placeholders only, no real secrets. Must be committed or
+# the Railway setup has nothing to copy from.
+!deploy/.env.deploy.example
 
 # --- runtime artifacts ---
 *.pid
 trades.db
 trades.db-*
+# Archived run databases — local experiment history, not source.
+archive/
 logs/
 
 # --- python ---

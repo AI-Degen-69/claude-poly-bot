@@ -1,0 +1,16 @@
+# Railway config — explicit Dockerfile builder (no Railpack auto-detect).
+# Env vars (TURSO_URL, TURSO_TOKEN, placeholder wallet fields) are set in the
+# Railway "Variables" tab, never committed.
+#
+# REGION: set the service region to a NON-US one (europe-west / Amsterdam).
+# Binance 451s US IPs and the spot gate depends on it.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

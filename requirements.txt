@@ -5,3 +5,4 @@ python-dotenv>=1.0
 web3>=6.0,<8.0
 fastapi>=0.110
 uvicorn[standard]>=0.27
+libsql>=0.1.0

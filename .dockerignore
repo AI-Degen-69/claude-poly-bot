@@ -1,0 +1,24 @@
+# Never ship local build artifacts into the image.
+# ui/node_modules is the critical one: stage 1 runs `npm ci` and then
+# `COPY ui/ ./`, which would clobber the container's Linux node_modules with
+# Windows-built native binaries and break the vite build.
+.venv/
+**/__pycache__/
+*.pyc
+ui/node_modules/
+ui/dist/
+node_modules/
+
+# Local state — must not leak into a shared image.
+.env
+.env.*
+!.env.example
+!deploy/.env.deploy.example
+trades.db
+trades.db-*
+archive/
+logs/
+*.pid
+bot.mode
+research/bonereader_raw/
+.git/

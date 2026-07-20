@@ -9,7 +9,9 @@ Run:  .venv/bin/uvicorn server.dashboard:app --host 127.0.0.1 --port 8787
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,9 +21,12 @@ import requests
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from bot import store
 from bot.book import fetch_book
 from bot.config import load as load_cfg
+from bot.fees import net_pnl
 from bot.markets import LiveMarket, fetch_live_market
+from bot.spot import FEED as SPOT, favored_side
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "trades.db"
@@ -46,56 +51,54 @@ _state: dict[str, Any] = {
 # SQLite reads
 
 
-def db() -> sqlite3.Connection:
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    return c
+def _query(sql: str, params: tuple = ()) -> list[dict]:
+    """Run a read against whichever backend store is using.
 
-
-def _row(r: sqlite3.Row) -> dict:
-    return {k: r[k] for k in r.keys()}
+    Goes through store.db() rather than opening its own sqlite connection --
+    otherwise with TURSO_URL set the bot would write to Turso while the
+    dashboard read an empty local file and showed nothing. Rows are zipped with
+    cursor.description instead of using sqlite3.Row, because the libsql
+    connection does not support row_factory.
+    """
+    try:
+        with store.db() as c:
+            cur = c.execute(sql, params)
+            cols = [d[0] for d in (cur.description or [])]
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+    except Exception as e:
+        _state["errors"]["db"] = str(e)
+        return []
 
 
 def recent_decisions(limit: int = 50, since_id: int = 0) -> list[dict]:
-    if not DB_PATH.exists():
-        return []
-    with db() as c:
-        rows = c.execute(
-            "SELECT id, ts, market_slug, side, t_remaining, ask_price, ask_size, "
-            "action, reason, dry_run FROM decisions WHERE id > ? "
-            "ORDER BY id DESC LIMIT ?",
-            (since_id, limit),
-        ).fetchall()
-        return [_row(r) for r in rows]
+    return _query(
+        "SELECT id, ts, market_slug, side, t_remaining, ask_price, ask_size, "
+        "action, reason, dry_run FROM decisions WHERE id > ? "
+        "ORDER BY id DESC LIMIT ?",
+        (since_id, limit),
+    )
 
 
 def recent_orders(limit: int = 50, since_id: int = 0) -> list[dict]:
-    if not DB_PATH.exists():
-        return []
-    with db() as c:
-        rows = c.execute(
-            "SELECT id, ts, market_slug, condition_id, token_id, side, size, "
-            "price, order_id, status, filled_size, error, dry_run FROM orders "
-            "WHERE id > ? ORDER BY id DESC LIMIT ?",
-            (since_id, limit),
-        ).fetchall()
-        return [_row(r) for r in rows]
+    return _query(
+        "SELECT id, ts, market_slug, condition_id, token_id, side, size, "
+        "price, order_id, status, filled_size, error, dry_run FROM orders "
+        "WHERE id > ? ORDER BY id DESC LIMIT ?",
+        (since_id, limit),
+    )
 
 
 def realized_pnl_today() -> dict:
     """Compute realized PnL from filled orders. Uses the bot's resolutions table
     (populated by bot.resolver) and back-fills any new resolutions on demand."""
-    if not DB_PATH.exists():
-        return {"realized_usd": 0.0, "wins": 0, "losses": 0, "pending": 0}
     cutoff = time.time() - 86400
-    with db() as c:
-        orders = c.execute(
-            "SELECT o.condition_id, o.market_slug, o.token_id, o.size, o.price, "
-            "r.winning_token "
-            "FROM orders o LEFT JOIN resolutions r ON r.condition_id = o.condition_id "
-            "WHERE o.dry_run=0 AND o.status IN ('filled','matched') AND o.ts > ?",
-            (cutoff,),
-        ).fetchall()
+    orders = _query(
+        "SELECT o.condition_id, o.market_slug, o.token_id, o.size, o.price, "
+        "r.winning_token "
+        "FROM orders o LEFT JOIN resolutions r ON r.condition_id = o.condition_id "
+        "WHERE o.dry_run=0 AND o.status IN ('filled','matched') AND o.ts > ?",
+        (cutoff,),
+    )
     if not orders:
         return {"realized_usd": 0.0, "wins": 0, "losses": 0, "pending": 0}
 
@@ -112,13 +115,96 @@ def realized_pnl_today() -> dict:
         if winner is None:
             pending += 1
             continue
+        # Net of the taker fee paid at entry -- gross PnL flatters this strategy
+        # by ~6-7% of edge, which is enough to invert the sign.
+        realized += net_pnl(float(o["size"]), float(o["price"]), winner == o["token_id"])
         if winner == o["token_id"]:
-            realized += float(o["size"]) * (1.0 - float(o["price"]))
             wins += 1
         else:
-            realized -= float(o["size"]) * float(o["price"])
             losses += 1
     return {"realized_usd": realized, "wins": wins, "losses": losses, "pending": pending}
+
+
+def _sim_positions_marked(market: Optional[dict]) -> list[dict]:
+    """Open simulated positions, marked to the live book where we can.
+
+    Mark uses the current best BID for that side — what we could actually get
+    out at. We never sell, so this is a valuation, not an exit plan. If the
+    position isn't in the currently-live window we have no fresh quote, so we
+    fall back to cost (mark == cost, unrealized 0) rather than invent a price.
+    """
+    rows = store.sim_open_positions()
+    bu, bd = _state.get("book_up"), _state.get("book_down")
+    for p in rows:
+        mark_px = None
+        if market and p["condition_id"] == market.get("condition_id"):
+            book = bu if p["side"] == "UP" else bd
+            if book:
+                mark_px = book.get("best_bid")
+        if mark_px is None:
+            mark_px = p["avg_price"]        # stale window: hold at cost
+            p["mark_source"] = "cost"
+        else:
+            p["mark_source"] = "book"
+        p["mark_price"] = mark_px
+        p["value"] = p["shares"] * mark_px
+        p["unrealized"] = p["value"] - (p["cost"] + p["fees"])
+    return rows
+
+
+def _spot_state(market: Optional[dict]) -> dict:
+    """Live view of the Binance gate: where BTC is vs the window open, and
+    whether that currently permits a trade."""
+    if not cfg.use_spot_gate:
+        return {"enabled": False}
+    px = SPOT.last_price()
+    out: dict = {
+        "enabled": True,
+        "healthy": px is not None,
+        "price": px,
+        "threshold_bps": cfg.min_spot_offset_bps,
+        "offset_bps": None,
+        "favored": None,
+        "gate": "NO FEED" if px is None else "…",
+    }
+    if market and px is not None:
+        off = SPOT.offset_bps(int(market["start_ts"]))
+        out["offset_bps"] = off
+        if off is None:
+            out["gate"] = "NO OPEN PX"
+        else:
+            out["favored"] = favored_side(off)
+            out["gate"] = "OPEN" if abs(off) >= cfg.min_spot_offset_bps else "FLAT"
+    return out
+
+
+_sim_cache: dict = {"ts": 0.0, "data": None}
+
+
+def _sim_cached(ttl: float = 5.0) -> dict:
+    """sim_report() scans the orders table; /api/state is polled ~1/s, so cache."""
+    now = time.time()
+    if _sim_cache["data"] is not None and now - _sim_cache["ts"] < ttl:
+        return _sim_cache["data"]
+
+    # Back-fill resolutions for simulated fills the bot's resolver hasn't
+    # reached yet, so the scorecard isn't permanently stuck on "pending".
+    try:
+        for cond, slug in store.unresolved_with_slug(dry_run=True)[:25]:
+            winner = _resolved_winning_token(slug)
+            if winner is not None:
+                _record_resolution(cond, winner)
+    except Exception as e:
+        _state["errors"]["sim_resolve"] = str(e)
+
+    try:
+        data = store.sim_report()
+        _state["errors"].pop("sim", None)
+    except Exception as e:
+        _state["errors"]["sim"] = str(e)
+        data = {"total": {}, "buckets": {}}
+    _sim_cache.update(ts=now, data=data)
+    return data
 
 
 _resolved_cache: dict[str, Optional[str]] = {}
@@ -135,17 +221,25 @@ def _resolved_winning_token(market_slug: str) -> Optional[str]:
     if market_slug in _resolved_cache:
         return _resolved_cache[market_slug]
     try:
+        # /events, not /markets — see bot/resolver.py: `/markets?slug=` returns
+        # an empty list once a 5-min market ages out of that index, so this
+        # silently reported everything as unresolved.
         r = requests.get(
-            f"{cfg.gamma_host}/markets",
-            params={"slug": market_slug, "closed": "true"},
-            timeout=3,
+            f"{cfg.gamma_host}/events",
+            params={"slug": market_slug},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
         )
         if r.status_code != 200:
             return None
-        markets = r.json()
+        events = r.json()
+        if not events:
+            return None
+        ev = events[0] if isinstance(events, list) else events
+        markets = ev.get("markets") or []
         if not markets:
             return None
-        m = markets[0] if isinstance(markets, list) else markets
+        m = markets[0]
         if not m.get("closed"):
             return None
         prices = m.get("outcomePrices")
@@ -169,12 +263,8 @@ def _resolved_winning_token(market_slug: str) -> Optional[str]:
 
 
 def _record_resolution(condition_id: str, winning_token: str) -> None:
-    with db() as c:
-        c.execute(
-            "INSERT OR REPLACE INTO resolutions (condition_id, winning_token, resolved_ts) "
-            "VALUES (?,?,?)",
-            (condition_id, winning_token, time.time()),
-        )
+    # store.record_resolution writes through whichever backend is active.
+    store.record_resolution(condition_id, winning_token)
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +274,7 @@ def _record_resolution(condition_id: str, winning_token: str) -> None:
 async def poll_market_loop():
     while True:
         try:
-            m = fetch_live_market(cfg.gamma_host, cfg.series_slug)
+            m = await asyncio.to_thread(fetch_live_market, cfg.gamma_host, cfg.series_slug)
             _state["market"] = (
                 {
                     "condition_id": m.condition_id,
@@ -212,8 +302,10 @@ async def poll_book_loop():
             await asyncio.sleep(0.5)
             continue
         try:
-            bu = fetch_book(cfg.clob_host, m["up_token"])
-            bd = fetch_book(cfg.clob_host, m["down_token"])
+            bu, bd = await asyncio.gather(
+                asyncio.to_thread(fetch_book, cfg.clob_host, m["up_token"]),
+                asyncio.to_thread(fetch_book, cfg.clob_host, m["down_token"]),
+            )
             _state["book_up"] = {
                 "best_bid": bu.best_bid,
                 "bid_size": bu.bid_size,
@@ -235,10 +327,12 @@ async def poll_book_loop():
 async def poll_positions_loop():
     while True:
         try:
-            r = requests.get(
-                "https://data-api.polymarket.com/positions",
-                params={"user": cfg.funder_address},
-                timeout=3,
+            r = await asyncio.to_thread(
+                lambda: requests.get(
+                    "https://data-api.polymarket.com/positions",
+                    params={"user": cfg.funder_address},
+                    timeout=3,
+                )
             )
             r.raise_for_status()
             _state["positions"] = r.json()
@@ -247,10 +341,12 @@ async def poll_positions_loop():
             _state["errors"]["positions"] = str(e)
 
         try:
-            r = requests.get(
-                "https://data-api.polymarket.com/value",
-                params={"user": cfg.funder_address},
-                timeout=3,
+            r = await asyncio.to_thread(
+                lambda: requests.get(
+                    "https://data-api.polymarket.com/value",
+                    params={"user": cfg.funder_address},
+                    timeout=3,
+                )
             )
             r.raise_for_status()
             data = r.json()
@@ -270,15 +366,17 @@ async def poll_balance_loop():
     while True:
         try:
             data = SELECTOR + cfg.funder_address.lower().replace("0x", "").rjust(64, "0")
-            r = requests.post(
-                cfg.polygon_rpc,
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "eth_call",
-                    "params": [{"to": PUSD, "data": data}, "latest"],
-                },
-                timeout=5,
+            r = await asyncio.to_thread(
+                lambda: requests.post(
+                    cfg.polygon_rpc,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "eth_call",
+                        "params": [{"to": PUSD, "data": data}, "latest"],
+                    },
+                    timeout=5,
+                )
             )
             r.raise_for_status()
             raw = r.json().get("result")
@@ -290,18 +388,54 @@ async def poll_balance_loop():
         await asyncio.sleep(5.0)
 
 
+def _pid_alive(pid: int) -> bool:
+    """Check whether a pid is running, without signalling it.
+
+    NOTE: os.kill(pid, 0) is NOT a liveness probe on Windows -- for any signal
+    other than CTRL_C_EVENT/CTRL_BREAK_EVENT, CPython calls TerminateProcess(),
+    so it would kill the bot instead of checking on it. Use the Win32 API here
+    and reserve os.kill for POSIX.
+    """
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+    try:
+        os.kill(pid, 0)  # signal 0 = existence check (POSIX only)
+        return True
+    except PermissionError:
+        return True  # exists, just owned by another user
+    except (ProcessLookupError, ValueError):
+        return False
+
+
 async def poll_bot_running_loop():
     pid_path = ROOT / "bot.pid"
+    # Under Git Bash on Windows, bot.pid holds an MSYS pid that os.kill() cannot
+    # resolve; the launch scripts also record the real Windows pid here.
+    win_pid_path = ROOT / "bot.win.pid"
     mode_path = ROOT / "bot.mode"
     while True:
         running = False
-        if pid_path.exists():
+        active_pid_path = win_pid_path if win_pid_path.exists() else pid_path
+        if active_pid_path.exists():
             try:
-                pid = int(pid_path.read_text().strip())
-                import os
-                os.kill(pid, 0)  # signal 0 = check existence
-                running = True
-            except (ProcessLookupError, ValueError, PermissionError):
+                pid = int(active_pid_path.read_text().strip())
+                running = _pid_alive(pid)
+            except (OSError, ValueError):
                 running = False
         mode = "unknown"
         if mode_path.exists():
@@ -335,6 +469,8 @@ async def _startup():
     asyncio.create_task(poll_positions_loop())
     asyncio.create_task(poll_balance_loop())
     asyncio.create_task(poll_bot_running_loop())
+    if cfg.use_spot_gate:
+        SPOT.start()   # read-only Binance feed, for gate visibility in the UI
 
 
 @app.get("/api/health")
@@ -347,16 +483,15 @@ def _risk_state(pnl: dict) -> str:
     if pnl["realized_usd"] <= -cfg.max_daily_loss_usd:
         return "LOSS_CAP"
     # consecutive-loss kill detection
-    with db() as c:
-        rows = c.execute(
-            "SELECT o.token_id, r.winning_token FROM orders o "
-            "JOIN resolutions r ON r.condition_id=o.condition_id "
-            "WHERE o.status IN ('filled','matched') AND o.dry_run=0 "
-            "ORDER BY r.resolved_ts DESC LIMIT 10"
-        ).fetchall()
+    rows = _query(
+        "SELECT o.token_id, r.winning_token FROM orders o "
+        "JOIN resolutions r ON r.condition_id=o.condition_id "
+        "WHERE o.status IN ('filled','matched') AND o.dry_run=0 "
+        "ORDER BY r.resolved_ts DESC LIMIT 10"
+    )
     streak = 0
-    for token, winner in rows:
-        if token == winner:
+    for r in rows:
+        if r["token_id"] == r["winning_token"]:
             break
         streak += 1
     if streak >= cfg.consecutive_loss_kill:
@@ -386,6 +521,18 @@ def state():
     m = _state.get("market")
     now = time.time()
     pnl = realized_pnl_today()
+
+    # Virtual account: cash from the ledger, open risk marked to the live book.
+    sim_positions = _sim_positions_marked(m)
+    account = store.sim_account(cfg.sim_bankroll_usd)
+    open_value = sum(p["value"] for p in sim_positions)
+    account["open_value"] = open_value
+    account["equity"] = account["cash"] + open_value
+    account["total_pnl"] = account["equity"] - account["bankroll"]
+    account["return_pct"] = (
+        (account["total_pnl"] / account["bankroll"] * 100.0) if account["bankroll"] else 0.0
+    )
+    account["open_positions"] = len(sim_positions)
     return {
         "now": now,
         "bot_running": _state["bot_running"],
@@ -407,17 +554,30 @@ def state():
         ),
         "book_up": _state.get("book_up"),
         "book_down": _state.get("book_down"),
-        "positions": _filter_active_positions(_state.get("positions") or []),
+        "positions": (
+            _filter_active_positions(_state.get("positions") or [])
+            if not cfg.sim_only
+            else []
+        ),
+        "sim_positions": sim_positions,
+        "account": account,
         "pnl": pnl,
         "config": {
             "max_entry_price": cfg.max_entry_price,
-            "loser_floor": 0.85,
+            "loser_floor": cfg.loser_floor,
             "seconds_before_close": cfg.seconds_before_close,
             "min_t_remaining_sec": cfg.min_t_remaining_sec,
-            "order_size_shares": cfg.order_size_shares,
+            "max_entries_per_market": cfg.max_entries_per_market,
+            "size_scale": cfg.size_scale,
             "max_open_positions": cfg.max_open_positions,
             "max_daily_loss_usd": cfg.max_daily_loss_usd,
+            "sim_only": cfg.sim_only,
+            "use_spot_gate": cfg.use_spot_gate,
+            "min_spot_offset_bps": cfg.min_spot_offset_bps,
         },
+        "sim": _sim_cached(),
+        "spot": _spot_state(m),
+        "settlements": store.sim_recent_settlements(limit=15),
         "decisions": recent_decisions(limit=80),
         "orders": recent_orders(limit=30),
         "errors": _state.get("errors") or {},
@@ -430,3 +590,15 @@ def events(since_decision: int = Query(0), since_order: int = Query(0)):
         "decisions": recent_decisions(limit=200, since_id=since_decision),
         "orders": recent_orders(limit=50, since_id=since_order),
     }
+
+
+# ---------------------------------------------------------------------------
+# Static UI (production). In dev the Vite server on :5173 proxies /api here;
+# in the container there is no Vite, so FastAPI serves the built bundle itself.
+# Mounted LAST so it never shadows an /api/* route.
+# ---------------------------------------------------------------------------
+_UI_DIST = ROOT / "ui" / "dist"
+if _UI_DIST.is_dir():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_UI_DIST), html=True), name="ui")

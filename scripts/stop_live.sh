@@ -22,4 +22,4 @@ if ps -p "$pid" > /dev/null 2>&1; then
 else
   echo "pid $pid not running"
 fi
-rm -f bot.pid bot.mode
+rm -f bot.pid bot.mode bot.win.pid

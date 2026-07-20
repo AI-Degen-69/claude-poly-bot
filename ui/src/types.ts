@@ -76,9 +76,94 @@ export interface Config {
   loser_floor: number;
   seconds_before_close: number;
   min_t_remaining_sec: number;
-  order_size_shares: number;
+  max_entries_per_market: number;
+  size_scale: number;
+  sim_only: boolean;
+  use_spot_gate: boolean;
+  min_spot_offset_bps: number;
   max_open_positions: number;
   max_daily_loss_usd: number;
+}
+
+export interface SimBucket {
+  n: number;
+  wins: number;
+  cost: number;
+  fees: number;
+  pnl: number;
+  win_rate: number | null;
+  breakeven: number | null;
+  edge_pts: number | null;
+}
+
+export interface SimTotal {
+  n?: number;
+  wins?: number;
+  cost?: number;
+  fees?: number;
+  pnl?: number;
+  shares?: number;
+  win_rate?: number | null;
+  pnl_bps_of_cost?: number | null;
+  pending?: number;
+}
+
+export interface SimReport {
+  total: SimTotal;
+  buckets: Record<string, SimBucket>;
+}
+
+export interface SpotState {
+  enabled: boolean;
+  healthy?: boolean;
+  price?: number | null;
+  threshold_bps?: number;
+  offset_bps?: number | null;
+  favored?: string | null;
+  gate?: string;
+}
+
+export interface Account {
+  bankroll: number;
+  cash: number;
+  deployed: number;
+  realized_pnl: number;
+  open_value: number;
+  equity: number;
+  total_pnl: number;
+  return_pct: number;
+  open_positions: number;
+  fills_resolved: number;
+  wins: number;
+  total_fees: number;
+}
+
+export interface SimPosition {
+  market_slug: string;
+  condition_id: string;
+  side: string;
+  shares: number;
+  cost: number;
+  fees: number;
+  fills: number;
+  avg_price: number;
+  mark_price: number;
+  mark_source: string;
+  value: number;
+  unrealized: number;
+}
+
+export interface Settlement {
+  market_slug: string;
+  side: string;
+  shares: number;
+  cost: number;
+  fees: number;
+  fills: number;
+  payout: number;
+  won: boolean;
+  pnl: number;
+  resolved_ts: number;
 }
 
 export interface State {
@@ -93,6 +178,11 @@ export interface State {
   positions: Position[];
   pnl: PnL;
   config: Config;
+  sim: SimReport;
+  spot: SpotState;
+  account: Account;
+  sim_positions: SimPosition[];
+  settlements: Settlement[];
   decisions: Decision[];
   orders: Order[];
   errors: Record<string, string>;

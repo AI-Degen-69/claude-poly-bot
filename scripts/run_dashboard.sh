@@ -8,8 +8,10 @@ mkdir -p logs
 ts=$(date +%Y%m%d_%H%M%S)
 server_log="logs/server_${ts}.log"
 ui_log="logs/ui_${ts}.log"
-ln -sfn "server_${ts}.log" logs/server_current.log
-ln -sfn "ui_${ts}.log" logs/ui_current.log
+touch "$server_log" "$ui_log"
+# Symlinks are unavailable under Git Bash on Windows; don't abort the launch.
+ln -sfn "server_${ts}.log" logs/server_current.log 2>/dev/null || echo "$server_log" > logs/server_current.path
+ln -sfn "ui_${ts}.log" logs/ui_current.log 2>/dev/null || echo "$ui_log" > logs/ui_current.path
 
 # stop any prior instance
 if [[ -f server.pid ]] && ps -p "$(cat server.pid)" > /dev/null 2>&1; then

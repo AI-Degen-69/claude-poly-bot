@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { fetchState } from './api';
-import type { Book, Decision, Order, Position, State } from './types';
-import { fmtDur, fmtNum, fmtPct, fmtPx, fmtTime, fmtUsd, shortAddr } from './format';
+import type { Account, Book, Decision, Order, Settlement, SimPosition, SimReport, SpotState, State } from './types';
+import { fmtDur, fmtNum, fmtPct, fmtPx, fmtTime, fmtUsd } from './format';
 
 const POLL_MS = 500;
 
@@ -53,13 +53,6 @@ export default function App() {
 
   const m = state?.market;
   const tRem = m ? Math.max(0, m.end_ts - now) : null;
-  const totalEquity =
-    (state?.wallet.balance_pusd ?? 0) + (state?.wallet.value_usd ?? 0);
-  const pnl = state?.pnl;
-  const winRate =
-    pnl && pnl.wins + pnl.losses > 0
-      ? (pnl.wins / (pnl.wins + pnl.losses)) * 100
-      : null;
 
   return (
     <>
@@ -76,32 +69,26 @@ export default function App() {
 
         <div style={gridStyle}>
           <div style={colStack}>
-            <Panel title="WALLET / EQUITY">
-              <Row k="DEPOSIT" v={shortAddr(state?.wallet.deposit)} mono />
-              <Row k="EOA" v={shortAddr(state?.wallet.eoa)} mono />
-              <Sep />
-              <Row k="pUSD CASH" v={fmtUsd(state?.wallet.balance_pusd)} hi />
-              <Row k="OPEN VALUE" v={fmtUsd(state?.wallet.value_usd)} />
-              <Sep />
-              <Row k="TOTAL EQUITY" v={fmtUsd(totalEquity)} hi big />
-            </Panel>
+            <AccountPanel account={state?.account} />
 
-            <Panel title="P&L · 24H">
-              <Row k="REALIZED" v={fmtUsd(pnl?.realized_usd)} colored={pnl?.realized_usd} />
-              <Row k="WINS / LOSSES" v={`${pnl?.wins ?? 0} / ${pnl?.losses ?? 0}`} />
-              <Row k="WIN RATE" v={fmtPct(winRate ?? null)} />
-              <Row k="PENDING" v={String(pnl?.pending ?? 0)} dim />
-            </Panel>
-
-            <Panel title="STRATEGY">
-              <Row k="LOSER FLOOR" v={`> ${fmtPx(state?.config.loser_floor)}`} mono />
-              <Row k="MAX ENTRY" v={`≤ ${fmtPx(state?.config.max_entry_price)}`} mono />
+            <Panel title="STRATEGY · BONEREAPER">
+              <Row k="ENTRY BAND" v={`${fmtPx(state?.config.loser_floor)} – ${fmtPx(state?.config.max_entry_price)}`} mono />
               <Row k="WINDOW" v={`${state?.config.min_t_remaining_sec ?? '?'}–${state?.config.seconds_before_close ?? '?'}s`} mono />
-              <Row k="SIZE" v={`${state?.config.order_size_shares ?? '?'} sh`} mono />
+              <Row k="FILLS / MKT" v={`≤ ${state?.config.max_entries_per_market ?? '?'}`} mono />
+              <Row k="SIZE SCALE" v={`${state?.config.size_scale ?? 1}×`} mono />
               <Sep />
               <Row k="MAX OPEN" v={String(state?.config.max_open_positions ?? '')} mono />
-              <Row k="LOSS CAP / DAY" v={fmtUsd(state?.config.max_daily_loss_usd)} mono />
+              <Row
+                k="EXECUTION"
+                v={state?.config.sim_only ? 'SIM — NO ORDERS' : 'ARMED'}
+                colored={state?.config.sim_only ? 1 : -1}
+                mono
+              />
             </Panel>
+
+            <SpotPanel spot={state?.spot} />
+
+            <SimPanel sim={state?.sim} />
           </div>
 
           <div style={colStack}>
@@ -141,8 +128,12 @@ export default function App() {
           </div>
 
           <div style={colStack}>
-            <Panel title="OPEN POSITIONS">
-              <PositionsTable positions={state?.positions ?? []} />
+            <Panel title={`OPEN POSITIONS · ${state?.account?.open_positions ?? 0}`}>
+              <SimPositionsTable positions={state?.sim_positions ?? []} />
+            </Panel>
+
+            <Panel title="SETTLEMENTS · resolved" flex>
+              <SettlementsTable settlements={state?.settlements ?? []} />
             </Panel>
 
             <Panel title="ORDERS · recent" flex>
@@ -250,6 +241,140 @@ function Panel({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * Virtual paper account. CASH is debited the instant a fill happens and
+ * credited back at resolution, so it can genuinely run dry — the bot logs
+ * SKIP_NO_CASH rather than spending money it doesn't have. EQUITY is cash plus
+ * open positions marked to the live book, so it moves tick-by-tick.
+ */
+function AccountPanel({ account: a }: { account?: Account }) {
+  const pnl = a?.total_pnl ?? 0;
+  const deployedPct =
+    a && a.bankroll ? ((a.deployed / a.bankroll) * 100).toFixed(0) : '0';
+  return (
+    <Panel title="PAPER ACCOUNT">
+      <Row k="EQUITY" v={fmtUsd(a?.equity)} hi big colored={pnl} />
+      <Row
+        k="TOTAL P&L"
+        v={a ? `${pnl >= 0 ? '+' : ''}${fmtUsd(pnl)}  (${a.return_pct >= 0 ? '+' : ''}${a.return_pct.toFixed(2)}%)` : '—'}
+        colored={pnl}
+        mono
+      />
+      <Sep />
+      <Row k="STARTING" v={fmtUsd(a?.bankroll)} dim mono />
+      <Row k="CASH FREE" v={fmtUsd(a?.cash)} mono />
+      <Row k="OPEN VALUE" v={fmtUsd(a?.open_value)} mono />
+      <Row k="DEPLOYED" v={`${fmtUsd(a?.deployed)} (${deployedPct}%)`} dim mono />
+      <Sep />
+      <Row k="REALIZED" v={fmtUsd(a?.realized_pnl)} colored={a?.realized_pnl ?? 0} mono />
+      <Row k="FEES PAID" v={fmtUsd(a?.total_fees)} colored={-1} mono />
+      <Row
+        k="SETTLED FILLS"
+        v={a ? `${a.wins} / ${a.fills_resolved} won` : '—'}
+        mono
+      />
+    </Panel>
+  );
+}
+
+/**
+ * Binance spot gate. GATE reads OPEN when |offset| clears the threshold and the
+ * bot may take the agreeing side, FLAT when BTC hasn't moved enough to call the
+ * window, and NO FEED when the websocket is stale — which blocks trading
+ * entirely rather than silently falling back to an ungated 81% hit rate.
+ */
+function SpotPanel({ spot }: { spot?: SpotState }) {
+  if (spot && !spot.enabled) {
+    return (
+      <Panel title="SPOT GATE">
+        <Row k="STATUS" v="DISABLED" dim />
+      </Panel>
+    );
+  }
+  const gate = spot?.gate ?? '—';
+  const off = spot?.offset_bps;
+  const gateColor = gate === 'OPEN' ? 1 : gate === 'FLAT' ? 0 : -1;
+
+  return (
+    <Panel title="SPOT GATE · BINANCE">
+      <Row k="BTC/USDT" v={spot?.price != null ? `$${spot.price.toLocaleString()}` : '—'} mono hi />
+      <Row
+        k="VS WINDOW OPEN"
+        v={off != null ? `${off > 0 ? '+' : ''}${off.toFixed(1)} bps` : '—'}
+        colored={off ?? 0}
+        mono
+      />
+      <Row k="THRESHOLD" v={`± ${spot?.threshold_bps ?? '?'} bps`} mono dim />
+      <Sep />
+      <Row k="IMPLIED SIDE" v={spot?.favored ?? '—'} mono hi />
+      <Row k="GATE" v={gate} colored={gateColor} mono />
+    </Panel>
+  );
+}
+
+/**
+ * Simulation scorecard. The bucket table is the point: a headline win rate is
+ * meaningless on its own, because buying at 0.98 needs ~98.1% just to break
+ * even after fees. EDGE = realized win rate minus that breakeven, in points.
+ * Green means the bucket genuinely paid; red means it lost despite winning.
+ */
+function SimPanel({ sim }: { sim?: SimReport }) {
+  const t = sim?.total ?? {};
+  const buckets = sim?.buckets ?? {};
+  const n = t.n ?? 0;
+
+  return (
+    <Panel title="SIMULATION · NET OF FEES">
+      <Row k="NET P&L" v={fmtUsd(t.pnl)} colored={t.pnl ?? 0} hi big />
+      <Row k="FILLS RESOLVED" v={String(n)} />
+      <Row k="WIN RATE" v={n ? fmtPct(t.win_rate ?? null) : '—'} />
+      <Row k="COST BASIS" v={fmtUsd(t.cost)} dim />
+      <Row k="FEES PAID" v={fmtUsd(t.fees)} colored={-1} />
+      <Row
+        k="EDGE"
+        v={t.pnl_bps_of_cost != null ? `${t.pnl_bps_of_cost.toFixed(1)} bps` : '—'}
+        colored={t.pnl_bps_of_cost ?? 0}
+      />
+      <Row k="PENDING" v={String(t.pending ?? 0)} dim />
+      <Sep />
+      <div style={{ display: 'flex', color: 'var(--txt-dim)', fontSize: '10px', padding: '2px 0' }}>
+        <span style={{ flex: 1.3 }}>PRICE</span>
+        <span style={{ flex: 0.7, textAlign: 'right' }}>N</span>
+        <span style={{ flex: 1, textAlign: 'right' }}>WIN</span>
+        <span style={{ flex: 1, textAlign: 'right' }}>NEED</span>
+        <span style={{ flex: 1, textAlign: 'right' }}>EDGE</span>
+      </div>
+      {Object.entries(buckets).map(([label, b]) => {
+        const edge = b.edge_pts;
+        const color =
+          b.n === 0 ? 'var(--txt-dim)'
+            : edge == null ? 'var(--txt)'
+              : edge > 0 ? 'var(--green)' : 'var(--red)';
+        return (
+          <div key={label} style={{ display: 'flex', padding: '1px 0', fontSize: '11px' }}>
+            <span style={{ flex: 1.3, color: 'var(--txt-dim)' }}>{label}</span>
+            <span style={{ flex: 0.7, textAlign: 'right', color: 'var(--txt)' }}>{b.n}</span>
+            <span style={{ flex: 1, textAlign: 'right', color: 'var(--txt)' }}>
+              {b.win_rate != null ? `${(b.win_rate * 100).toFixed(0)}%` : '—'}
+            </span>
+            <span style={{ flex: 1, textAlign: 'right', color: 'var(--txt-dim)' }}>
+              {b.breakeven != null ? `${(b.breakeven * 100).toFixed(1)}%` : '—'}
+            </span>
+            <span style={{ flex: 1, textAlign: 'right', color, fontWeight: 700 }}>
+              {edge != null ? `${edge > 0 ? '+' : ''}${(edge * 100).toFixed(1)}` : '—'}
+            </span>
+          </div>
+        );
+      })}
+      {n === 0 && (
+        <div style={{ color: 'var(--txt-dim)', padding: '6px 0', fontSize: '11px' }}>
+          awaiting first resolved fill…
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -377,27 +502,73 @@ function OrdersTable({ orders }: { orders: Order[] }) {
   );
 }
 
-function PositionsTable({ positions }: { positions: Position[] }) {
+/**
+ * Simulated open positions — what the bot is currently holding into resolution.
+ * MARK is the live best bid for that side; positions in a window that is no
+ * longer the live one are held at cost (shown dim) rather than guessed at.
+ */
+function SimPositionsTable({ positions }: { positions: SimPosition[] }) {
   if (!positions.length) return <Empty>no open positions<span className="caret">_</span></Empty>;
   return (
     <table style={tableStyle}>
       <thead>
         <tr>
-          <Th>TITLE</Th>
+          <Th>MARKET</Th>
           <Th>SIDE</Th>
-          <Th right>SIZE</Th>
-          <Th right>PX</Th>
-          <Th right>VAL</Th>
+          <Th right>SH</Th>
+          <Th right>AVG</Th>
+          <Th right>MARK</Th>
+          <Th right>COST</Th>
+          <Th right>UNREAL</Th>
         </tr>
       </thead>
       <tbody>
         {positions.map((p, i) => (
           <tr key={i}>
-            <Td dim>{(p.title || '').replace(/^Bitcoin Up or Down - /, '')}</Td>
-            <Td>{p.outcome}</Td>
-            <Td right>{fmtNum(p.size, 2)}</Td>
-            <Td right>{fmtPx(p.curPrice)}</Td>
-            <Td right>{fmtUsd((p.size ?? 0) * (p.curPrice ?? 0))}</Td>
+            <Td dim>…{p.market_slug.slice(-10)}</Td>
+            <Td bold color={p.side === 'UP' ? 'var(--green)' : 'var(--red)'}>{p.side}</Td>
+            <Td right>{fmtNum(p.shares, 0)}</Td>
+            <Td right>{fmtPx(p.avg_price)}</Td>
+            <Td right dim={p.mark_source === 'cost'}>{fmtPx(p.mark_price)}</Td>
+            <Td right>{fmtUsd(p.cost)}</Td>
+            <Td right bold color={p.unrealized >= 0 ? 'var(--green)' : 'var(--red)'}>
+              {p.unrealized >= 0 ? '+' : ''}{fmtUsd(p.unrealized)}
+            </Td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** Resolved windows, newest first — the actual outcome of each market. */
+function SettlementsTable({ settlements }: { settlements: Settlement[] }) {
+  if (!settlements.length) return <Empty>awaiting first settlement<span className="caret">_</span></Empty>;
+  return (
+    <table style={tableStyle}>
+      <thead>
+        <tr>
+          <Th>TIME</Th>
+          <Th>MARKET</Th>
+          <Th>SIDE</Th>
+          <Th right>FILLS</Th>
+          <Th right>COST</Th>
+          <Th right>PAID</Th>
+          <Th right>P&L</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {settlements.map((s, i) => (
+          <tr key={i}>
+            <Td dim>{fmtTime(s.resolved_ts)}</Td>
+            <Td dim>…{s.market_slug.slice(-10)}</Td>
+            <Td bold color={s.won ? 'var(--green)' : 'var(--red)'}>{s.side}</Td>
+            <Td right>{s.fills}</Td>
+            <Td right>{fmtUsd(s.cost)}</Td>
+            <Td right>{fmtUsd(s.payout)}</Td>
+            <Td right bold color={s.pnl >= 0 ? 'var(--green)' : 'var(--red)'}>
+              {s.pnl >= 0 ? '+' : ''}{fmtUsd(s.pnl)}
+            </Td>
           </tr>
         ))}
       </tbody>
