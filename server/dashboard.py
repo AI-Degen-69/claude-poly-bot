@@ -63,7 +63,13 @@ def _query(sql: str, params: tuple = ()) -> list[dict]:
     try:
         with store.db() as c:
             cur = c.execute(sql, params)
-            cols = [d[0] for d in (cur.description or [])]
+            # Lower-case the column names. libsql returns SQL KEYWORDS in
+            # cursor.description upper-cased -- `action` comes back as `ACTION`
+            # on Turso but `action` on sqlite3. The UI reads `d.action`, so on
+            # Turso it got undefined, called .startsWith() on it, and the
+            # resulting throw unmounted React into a blank page. Our schema is
+            # all-lowercase, so normalising is safe and covers future keywords.
+            cols = [d[0].lower() for d in (cur.description or [])]
             return [dict(zip(cols, r)) for r in cur.fetchall()]
     except Exception as e:
         _state["errors"]["db"] = str(e)

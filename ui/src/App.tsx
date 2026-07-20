@@ -429,7 +429,11 @@ function BookView({
   );
 }
 
-function actionColor(a: string): string {
+// Defensive: a single malformed row must never blank the whole dashboard.
+// A libsql column-name casing quirk once made `action` undefined here, and the
+// resulting throw unmounted React entirely.
+function actionColor(a?: string): string {
+  if (!a) return 'var(--txt-dim)';
   if (a === 'BUY') return 'var(--green)';
   if (a.startsWith('SKIP')) return 'var(--txt-dim)';
   return 'var(--txt)';
