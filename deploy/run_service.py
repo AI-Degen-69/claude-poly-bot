@@ -72,24 +72,46 @@ def preflight() -> None:
     except Exception as e:
         problems.append(f"Binance unreachable: {e}")
 
-    # 3. Polymarket reachability.
+    # 3. Config. Reported separately from network errors: a missing env var
+    #    surfaced as "Polymarket unreachable: 'PRIVATE_KEY'", which sent the
+    #    reader hunting for a connectivity problem that did not exist.
+    cfg = None
     try:
         from bot.config import load
-        from bot.markets import fetch_live_market
         cfg = load()
-        m = fetch_live_market(cfg.gamma_host, cfg.series_slug)
-        print(f"[preflight] polymarket OK: live market={m.market_slug if m else None}",
-              flush=True)
+    except KeyError as e:
+        problems.append(
+            f"Missing required environment variable {e}. Set the variables from "
+            f"deploy/.env.deploy.example in your host's Variables tab "
+            f"(the wallet fields stay as the fake placeholders)."
+        )
+    except Exception as e:
+        problems.append(f"Config failed to load: {type(e).__name__}: {e}")
+
+    # 4. Polymarket reachability (only meaningful once config loaded).
+    if cfg is not None:
+        try:
+            from bot.markets import fetch_live_market
+            m = fetch_live_market(cfg.gamma_host, cfg.series_slug)
+            print(f"[preflight] polymarket OK: live market={m.market_slug if m else None}",
+                  flush=True)
+        except Exception as e:
+            problems.append(f"Polymarket unreachable: {type(e).__name__}: {e}")
         if not cfg.sim_only:
             problems.append("sim_only is False -- refusing to run a hosted box "
                             "that could place real orders.")
-    except Exception as e:
-        problems.append(f"Polymarket unreachable: {e}")
 
     if problems:
         print("\n[preflight] FAILED:", flush=True)
         for p in problems:
             print(f"  - {p}", flush=True)
+        # Back off before exiting. The host restarts on failure, and without
+        # this the container respawns ~1/sec, spamming logs and hammering
+        # Binance/Polymarket with a preflight burst on every retry.
+        if "--preflight" not in sys.argv:
+            print("[preflight] sleeping 30s before exit to avoid a hot restart loop",
+                  flush=True)
+            time.sleep(30)
         sys.exit(1)
     print("[preflight] all checks passed", flush=True)
 
