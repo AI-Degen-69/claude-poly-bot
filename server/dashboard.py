@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 import requests
 from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from bot import store
@@ -712,6 +713,17 @@ def events(since_decision: int = Query(0), since_order: int = Query(0)):
 # in the container there is no Vite, so FastAPI serves the built bundle itself.
 # Mounted LAST so it never shadows an /api/* route.
 # ---------------------------------------------------------------------------
+# Kanban view of the same data, mounted BEFORE the static UI so it isn't
+# shadowed by the catch-all mount. Mirrors the maker dashboard's pipeline shape
+# with taker-specific lanes and metrics.
+from server.taker_kanban import PAGE as _KANBAN_PAGE
+
+
+@app.get("/kanban", response_class=HTMLResponse)
+def kanban():
+    return _KANBAN_PAGE
+
+
 _UI_DIST = ROOT / "ui" / "dist"
 if _UI_DIST.is_dir():
     from fastapi.staticfiles import StaticFiles

@@ -60,29 +60,29 @@ PAGE = r"""
        --pu:#9b7fd4}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--tx);
-      font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
+      font:14.5px ui-monospace,SFMono-Regular,Menlo,monospace}
  .bar{display:flex;align-items:center;gap:12px;padding:7px 14px;
       border-bottom:1px solid var(--bd);background:var(--pan)}
- .bar b{color:var(--am);letter-spacing:1.4px}
- .chip{border:1px solid var(--gn);color:var(--gn);padding:1px 8px;font-size:10px;letter-spacing:1.4px}
+ .bar b{color:var(--am);letter-spacing:1.4px;font-size:16px}
+ .chip{border:1px solid var(--gn);color:var(--gn);padding:2px 9px;font-size:11.5px;letter-spacing:1.4px}
 
  /* ---------- sample-size bars (were broken: spans are inline, so width/height
     were ignored entirely and the bar never reflected progress) ---------- */
  .samp{display:flex;align-items:center;gap:18px;padding:7px 14px;
        border-bottom:1px solid var(--bd);background:#0d1113;flex-wrap:wrap}
- .lab{color:var(--dim);font-size:10px;letter-spacing:1.2px}
- .tgt{display:inline-flex;align-items:center;gap:7px;font-size:11px}
- .track{display:inline-block;width:130px;height:9px;background:#1b2124;
+ .lab{color:var(--dim);font-size:11.5px;letter-spacing:1.2px}
+ .tgt{display:inline-flex;align-items:center;gap:7px;font-size:12.5px}
+ .track{display:inline-block;width:150px;height:11px;background:#1b2124;
         border:1px solid var(--bd);position:relative;overflow:hidden;vertical-align:middle}
  .fillbar{display:block;height:100%;background:var(--bl);transition:width .6s ease}
 
  /* ---------- kpi strip ---------- */
- .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+ .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));
        gap:7px;padding:9px 12px;border-bottom:1px solid var(--bd)}
  .k{border:1px solid var(--bd);background:var(--pan);padding:6px 9px}
- .k .n{color:var(--dim);font-size:9px;letter-spacing:.8px}
- .k .v{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
- .k .s{color:var(--dim);font-size:9.5px}
+ .k .n{color:var(--dim);font-size:10.5px;letter-spacing:.8px}
+ .k .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+ .k .s{color:var(--dim);font-size:11px}
 
  /* ---------- kanban ---------- */
  .kan{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:10px 12px;
@@ -90,12 +90,12 @@ PAGE = r"""
  @media(max-width:1250px){.kan{grid-template-columns:repeat(2,1fr)}}
  .lane{border:1px solid var(--bd);background:var(--pan);display:flex;
        flex-direction:column;min-height:150px}
- .lane h3{margin:0;padding:6px 9px;font-size:9.5px;letter-spacing:1.3px;
+ .lane h3{margin:0;padding:8px 11px;font-size:11.5px;letter-spacing:1.3px;
           border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;
           align-items:center;font-weight:700}
  .lane .body{padding:6px;display:flex;flex-direction:column;gap:5px;
-             max-height:430px;overflow-y:auto}
- .cnt{background:#1c2225;color:var(--dim);padding:0 6px;border-radius:8px;font-size:9px}
+             max-height:520px;overflow-y:auto}
+ .cnt{background:#1c2225;color:var(--dim);padding:1px 7px;border-radius:8px;font-size:10.5px}
 
  /* stage colours */
  .l1 h3{color:var(--dim)}   .l1{border-top:2px solid #3a4145}
@@ -105,9 +105,9 @@ PAGE = r"""
  .l5 h3{color:var(--gn)}    .l5{border-top:2px solid var(--gn)}
 
  .card{background:var(--pan2);border:1px solid var(--bd);border-left:2px solid var(--bd);
-       padding:5px 7px;font-size:10.5px;line-height:1.5}
+       padding:7px 9px;font-size:12.5px;line-height:1.55}
  .card .top{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
- .card .sub{color:var(--dim);font-size:9.5px}
+ .card .sub{color:var(--dim);font-size:11px}
  .card.up{border-left-color:var(--gn)} .card.dn{border-left-color:var(--rd)}
  .card.win{border-left-color:var(--gn)} .card.loss{border-left-color:var(--rd)}
  .card.skip{opacity:.62}
@@ -123,7 +123,7 @@ PAGE = r"""
  .enter{animation:flowin .55s cubic-bezier(.22,.9,.3,1)}
  @media (prefers-reduced-motion: reduce){ .enter{animation:none} }
 
- .note{color:var(--dim);font-size:9.5px;padding:5px 9px;line-height:1.5;
+ .note{color:var(--dim);font-size:11px;padding:6px 10px;line-height:1.5;
        border-top:1px solid var(--bd)}
  .livebar{display:flex;gap:18px;align-items:center;padding:7px 14px;
           border-bottom:1px solid var(--bd);background:var(--pan);flex-wrap:wrap}
@@ -194,7 +194,7 @@ async function tick(){
     <span class="lab">LIVE</span>
     <a href="https://polymarket.com/event/${L.market_slug}" target="_blank"
        style="color:var(--am);text-decoration:none">${L.market_slug} ↗</a>
-    <span class="a" style="font-size:16px;font-weight:700">${num(Math.max(0,L.t_remaining))}s</span>
+    <span class="a" style="font-size:20px;font-weight:700">${num(Math.max(0,L.t_remaining))}s</span>
     <span class="d">UP</span><span class="g">${u.best_bid==null?'—':u.best_bid.toFixed(2)}</span>
       <span class="d">/</span><span class="a">${u.best_ask==null?'—':u.best_ask.toFixed(2)}</span>
     <span class="d">DOWN</span><span class="g">${d.best_bid==null?'—':d.best_bid.toFixed(2)}</span>
