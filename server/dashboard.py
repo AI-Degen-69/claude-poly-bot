@@ -139,9 +139,14 @@ def _sim_positions_marked(market: Optional[dict]) -> list[dict]:
     position isn't in the currently-live window we have no fresh quote, so we
     fall back to cost (mark == cost, unrealized 0) rather than invent a price.
     """
-    rows = store.sim_open_positions()
+    return _mark_positions(store.sim_open_positions(), market, time.time())
+
+
+def _mark_positions(rows: list[dict], market: Optional[dict], now: float) -> list[dict]:
+    """Mark pre-fetched open positions to the live book. Pure in-memory: no DB
+    reads, so it runs on every request while the position SET refreshes on the
+    slower analytics cadence."""
     bu, bd = _state.get("book_up"), _state.get("book_down")
-    now = time.time()
     for p in rows:
         # A position's own window ends 300s after the ts encoded in its slug.
         # Once that passes, the outcome is decided and only the resolver is
@@ -518,6 +523,7 @@ async def _startup():
     asyncio.create_task(poll_positions_loop())
     asyncio.create_task(poll_balance_loop())
     asyncio.create_task(poll_bot_running_loop())
+    asyncio.create_task(analytics_loop())
     if cfg.use_spot_gate:
         SPOT.start()   # read-only Binance feed, for gate visibility in the UI
 
@@ -527,22 +533,10 @@ def health():
     return {"ok": True, "ts": time.time()}
 
 
-def _risk_state(pnl: dict) -> str:
-    """Approximate the bot's risk-gate state for UI display."""
+def _risk_state_from(pnl: dict, streak: int) -> str:
+    """Risk-gate state for the UI, from pre-computed values (no DB read)."""
     if pnl["realized_usd"] <= -cfg.max_daily_loss_usd:
         return "LOSS_CAP"
-    # consecutive-loss kill detection
-    rows = _query(
-        "SELECT o.token_id, r.winning_token FROM orders o "
-        "JOIN resolutions r ON r.condition_id=o.condition_id "
-        "WHERE o.status IN ('filled','matched') AND o.dry_run=0 "
-        "ORDER BY r.resolved_ts DESC LIMIT 10"
-    )
-    streak = 0
-    for r in rows:
-        if r["token_id"] == r["winning_token"]:
-            break
-        streak += 1
     if streak >= cfg.consecutive_loss_kill:
         return f"LOSS_STREAK({streak})"
     return "OK"
@@ -565,28 +559,99 @@ def _filter_active_positions(positions: list[dict]) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Analytics snapshot.
+#
+# CRITICAL: every aggregate below scans the orders table, and hosted databases
+# (Turso) bill *every scanned row*. Running these per /api/state poll -- ~2/sec
+# per open browser tab -- read 1.09 BILLION rows in a day and tripped the free
+# tier's block. So they run ONCE here, in a single background pass shared by all
+# clients, and /api/state serves the cached result with zero DB reads.
+# ---------------------------------------------------------------------------
+_analytics: dict = {"ts": 0.0, "data": None}
+ANALYTICS_TTL = 15.0
+
+
+def _refresh_analytics() -> None:
+    """One pass: back-fill new resolutions, then recompute every aggregate."""
+    try:
+        for cond, slug in store.unresolved_with_slug(dry_run=True)[:25]:
+            winner = _resolved_winning_token(slug)
+            if winner is not None:
+                _record_resolution(cond, winner)
+    except Exception as e:
+        _state["errors"]["sim_resolve"] = str(e)
+
+    try:
+        data = {
+            "account": store.sim_account(cfg.sim_bankroll_usd),
+            "open_positions_raw": store.sim_open_positions(),
+            "kpi": store.kpi_report(cfg.sim_bankroll_usd),
+            "sim": store.sim_report(),
+            "settlements": store.sim_recent_settlements(limit=2000),
+            "pnl": realized_pnl_today(),
+            "risk_streak": _consec_loss_streak(),
+            "decisions": recent_decisions(limit=80),
+            "orders": recent_orders(limit=30),
+        }
+        _analytics.update(ts=time.time(), data=data)
+        _state["errors"].pop("analytics", None)
+    except Exception as e:
+        _state["errors"]["analytics"] = str(e)
+
+
+async def analytics_loop():
+    while True:
+        await asyncio.to_thread(_refresh_analytics)
+        await asyncio.sleep(ANALYTICS_TTL)
+
+
+def _consec_loss_streak() -> int:
+    rows = _query(
+        "SELECT o.token_id, r.winning_token FROM orders o "
+        "JOIN resolutions r ON r.condition_id=o.condition_id "
+        "WHERE o.status IN ('filled','matched','sim') AND o.dry_run=1 "
+        "ORDER BY r.resolved_ts DESC LIMIT 10"
+    )
+    streak = 0
+    for r in rows:
+        if r["token_id"] == r["winning_token"]:
+            break
+        streak += 1
+    return streak
+
+
 @app.get("/api/state")
 def state():
     m = _state.get("market")
     now = time.time()
-    pnl = realized_pnl_today()
 
-    # Virtual account: cash from the ledger, open risk marked to the live book.
-    sim_positions = _sim_positions_marked(m)
-    account = store.sim_account(cfg.sim_bankroll_usd)
+    snap = _analytics["data"]
+    if snap is None:
+        # First request before the loop's first pass — compute once inline so
+        # the dashboard isn't blank on cold start.
+        _refresh_analytics()
+        snap = _analytics["data"] or {}
+
+    pnl = snap.get("pnl") or {"realized_usd": 0.0, "wins": 0, "losses": 0, "pending": 0}
+
+    # Mark open positions to the LIVE book here (cheap, in-memory) so marks stay
+    # real-time even though the position SET only refreshes every ANALYTICS_TTL.
+    sim_positions = _mark_positions(snap.get("open_positions_raw") or [], m, now)
+    account = dict(snap.get("account") or {})
     open_value = sum(p["value"] for p in sim_positions)
     account["open_value"] = open_value
-    account["equity"] = account["cash"] + open_value
-    account["total_pnl"] = account["equity"] - account["bankroll"]
+    account["equity"] = account.get("cash", 0.0) + open_value
+    account["total_pnl"] = account["equity"] - account.get("bankroll", cfg.sim_bankroll_usd)
     account["return_pct"] = (
-        (account["total_pnl"] / account["bankroll"] * 100.0) if account["bankroll"] else 0.0
+        (account["total_pnl"] / account["bankroll"] * 100.0) if account.get("bankroll") else 0.0
     )
     account["open_positions"] = len(sim_positions)
     return {
         "now": now,
         "bot_running": _state["bot_running"],
         "bot_mode": _state.get("bot_mode", "stopped"),
-        "risk_state": _risk_state(pnl),
+        "risk_state": _risk_state_from(pnl, snap.get("risk_streak", 0)),
         "wallet": {
             "eoa": cfg.wallet_address,
             "deposit": cfg.funder_address,
@@ -624,14 +689,12 @@ def state():
             "use_spot_gate": cfg.use_spot_gate,
             "min_spot_offset_bps": cfg.min_spot_offset_bps,
         },
-        "sim": _sim_cached(),
-        "kpi": _kpi_cached(),
+        "sim": snap.get("sim") or {"total": {}, "buckets": {}},
+        "kpi": snap.get("kpi") or {},
         "spot": _spot_state(m),
-        # All resolved markets since inception. The panel scrolls; this is
-        # cheap because it's one GROUP BY over the orders table.
-        "settlements": store.sim_recent_settlements(limit=5000),
-        "decisions": recent_decisions(limit=80),
-        "orders": recent_orders(limit=30),
+        "settlements": snap.get("settlements") or [],
+        "decisions": snap.get("decisions") or [],
+        "orders": snap.get("orders") or [],
         "errors": _state.get("errors") or {},
     }
 
