@@ -49,10 +49,26 @@ def preflight() -> None:
             "TURSO_URL is set but libsql is not importable -- data would be "
             "written to an ephemeral local file and lost on redeploy."
         )
-    if not os.environ.get("TURSO_URL") and not os.environ.get("POLYBOT_DB"):
+    polybot_db = os.environ.get("POLYBOT_DB")
+    if not os.environ.get("TURSO_URL") and not polybot_db:
         print("[preflight] WARNING: no TURSO_URL and no POLYBOT_DB -- using a "
               "container-local trades.db, which is LOST on redeploy unless a "
               "volume is mounted.", flush=True)
+    if polybot_db and not store.USE_TURSO:
+        # Actually open + write + read the DB so a missing/unwritable volume
+        # mount fails HERE with a clear message, not later as a cryptic
+        # "unable to open database file" mid-run.
+        try:
+            with store.db() as _c:
+                _c.execute("CREATE TABLE IF NOT EXISTS _preflight (x INTEGER)")
+                _c.execute("INSERT INTO _preflight VALUES (1)")
+                _c.execute("DELETE FROM _preflight")
+            print(f"[preflight] volume OK: {polybot_db} is writable", flush=True)
+        except Exception as e:
+            problems.append(
+                f"POLYBOT_DB={polybot_db} is not writable ({e}). Mount a Railway "
+                f"volume at that directory (Settings -> Volumes -> /data)."
+            )
 
     # 2. Binance reachability. The spot gate IS the strategy; if Binance geo-
     #    blocks this region the gate fails closed and we collect zero fills
