@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
 
-from bot.fees import breakeven_win_rate, net_pnl, taker_fee
+from strategy.fees import breakeven_win_rate, net_pnl, taker_fee
 
 DB_PATH = Path(__file__).resolve().parent.parent / "trades.db"
 
@@ -637,7 +637,7 @@ def kpi_report(bankroll: float) -> dict:
                 verdict = "INCONCLUSIVE"
 
     # Gate audit: win rate above vs below the config threshold.
-    from bot.config import load as _load
+    from strategy.config import load as _load
     thr = _load().min_spot_offset_bps
     hi = [w for b, w in bpses if b >= thr * 2]      # strong signal (2x threshold)
     lo = [w for b, w in bpses if b < thr * 2]

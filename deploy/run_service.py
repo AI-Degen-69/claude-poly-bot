@@ -42,7 +42,7 @@ def preflight() -> None:
 
     # 1. Storage. TURSO_URL set but libsql missing means we quietly write to a
     #    container-local file that vanishes on the next redeploy.
-    from bot import store
+    from strategy import store
     print(f"[preflight] storage backend: {store.backend_name()}", flush=True)
     if os.environ.get("TURSO_URL") and not store.USE_TURSO:
         problems.append(
@@ -93,7 +93,7 @@ def preflight() -> None:
     #    reader hunting for a connectivity problem that did not exist.
     cfg = None
     try:
-        from bot.config import load
+        from strategy.config import load
         cfg = load()
     except KeyError as e:
         problems.append(
@@ -107,7 +107,7 @@ def preflight() -> None:
     # 4. Polymarket reachability (only meaningful once config loaded).
     if cfg is not None:
         try:
-            from bot.markets import fetch_live_market
+            from strategy.markets import fetch_live_market
             m = fetch_live_market(cfg.gamma_host, cfg.series_slug)
             print(f"[preflight] polymarket OK: live market={m.market_slug if m else None}",
                   flush=True)
@@ -134,7 +134,7 @@ def preflight() -> None:
 
 def prune_loop() -> None:
     """Drop decisions older than 30d, once a day. orders/resolutions kept."""
-    from bot import store
+    from strategy import store
     while True:
         time.sleep(86400)
         try:
@@ -150,7 +150,7 @@ def run_bot() -> None:
     while True:
         print("[bot] starting (paper/sim)", flush=True)
         # No --live. Ever. This container has placeholder credentials.
-        proc = subprocess.Popen([sys.executable, "-m", "bot.main"],
+        proc = subprocess.Popen([sys.executable, "-m", "strategy.main"],
                                 cwd=str(ROOT), env=env)
         code = proc.wait()
         print(f"[bot] exited code={code}; restarting in {RESTART_BACKOFF}s", flush=True)

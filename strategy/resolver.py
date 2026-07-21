@@ -7,8 +7,8 @@ from typing import Optional
 
 import requests
 
-from bot import store
-from bot.config import Config
+from strategy import store
+from strategy.config import Config
 
 log = logging.getLogger("bot.resolver")
 

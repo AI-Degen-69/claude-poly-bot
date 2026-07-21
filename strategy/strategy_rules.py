@@ -26,11 +26,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from bot.book import TopOfBook
-from bot.config import Config
-from bot.fees import breakeven_win_rate, taker_fee
-from bot.markets import LiveMarket
-from bot.spot import favored_side
+from strategy.book import TopOfBook
+from strategy.config import Config
+from strategy.fees import breakeven_win_rate, taker_fee
+from strategy.markets import LiveMarket
+from strategy.spot import favored_side
 
 
 @dataclass(frozen=True)

@@ -160,7 +160,7 @@ class SpotFeed:
         return (now_px - open_px) / open_px * 10_000.0
 
 
-# Module-level singleton; bot.main starts it, strategy reads it.
+# Module-level singleton; strategy.main starts it, strategy_rules reads it.
 FEED = SpotFeed()
 
 
