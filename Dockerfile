@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libssl-dev 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY bot/     /app/bot/
+COPY strategy/ /app/strategy/
 COPY server/  /app/server/
 COPY deploy/  /app/deploy/
 COPY --from=ui /ui/dist /app/ui/dist
@@ -40,7 +40,7 @@ ENV PORT=8787
 #   TURSO_URL, TURSO_TOKEN   (storage; without these data dies on redeploy)
 #   PRIVATE_KEY, WALLET_ADDRESS, FUNDER_ADDRESS, CLOB_API_*
 #     ^ PLACEHOLDERS ONLY. Paper mode never builds a CLOB client
-#       (bot/main.py: `build_client(cfg) if live else None`), so the real
+#       (strategy/main.py: `build_client(cfg) if live else None`), so the real
 #       funded key must never be put on this box.
 
 EXPOSE 8787

@@ -84,7 +84,7 @@ def fetch_live_market(gamma_host: str, series_slug: str) -> Optional[LiveMarket]
 
 
 if __name__ == "__main__":
-    from bot.config import load
+    from strategy.config import load
 
     cfg = load()
     m = fetch_live_market(cfg.gamma_host, cfg.series_slug)

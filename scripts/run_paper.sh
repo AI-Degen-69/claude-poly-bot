@@ -19,7 +19,7 @@ touch "$log"
 ln -sfn "bot_${ts}.log" logs/bot_current.log 2>/dev/null || echo "$log" > logs/bot_current.path
 
 # No --live flag = dry-run / paper mode
-nohup .venv/bin/python -m bot.main > "$log" 2>&1 &
+nohup .venv/bin/python -m strategy.main > "$log" 2>&1 &
 echo $! > bot.pid
 echo "paper" > bot.mode
 # Git Bash reports an MSYS pid, which native-Windows Python cannot check with

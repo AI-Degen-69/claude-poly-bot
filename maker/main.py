@@ -18,8 +18,8 @@ from typing import Optional
 
 import requests
 
-from bot.config import load as load_bot_cfg
-from bot.markets import fetch_live_market
+from strategy.config import load as load_bot_cfg
+from strategy.markets import fetch_live_market
 from maker import store
 from maker.config import load as load_cfg
 from maker.fills import QueueFillEngine

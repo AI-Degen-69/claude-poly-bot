@@ -1,8 +1,8 @@
 """Risk caps. Returns (allowed, reason)."""
 from __future__ import annotations
 
-from bot.config import Config
-from bot.store import consecutive_losses, open_positions_count, realized_pnl_today
+from strategy.config import Config
+from strategy.store import consecutive_losses, open_positions_count, realized_pnl_today
 
 
 def allowed_to_trade(cfg: Config, dry_run: bool) -> tuple[bool, str]:

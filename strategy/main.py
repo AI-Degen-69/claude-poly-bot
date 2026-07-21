@@ -7,14 +7,14 @@ import logging
 import time
 from typing import Optional
 
-from bot import config, store
-from bot.book import fetch_book
-from bot.markets import LiveMarket, fetch_live_market
-from bot.orders import build_client, place_buy_fok
-from bot.resolver import resolve_pending
-from bot.risk import allowed_to_trade
-from bot.spot import FEED
-from bot.strategy import decide
+from strategy import config, store
+from strategy.book import fetch_book
+from strategy.markets import LiveMarket, fetch_live_market
+from strategy.orders import build_client, place_buy_fok
+from strategy.resolver import resolve_pending
+from strategy.risk import allowed_to_trade
+from strategy.spot import FEED
+from strategy.strategy_rules import decide
 
 log = logging.getLogger("bot")
 

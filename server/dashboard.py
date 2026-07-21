@@ -22,12 +22,12 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from bot import store
-from bot.book import fetch_book
-from bot.config import load as load_cfg
-from bot.fees import net_pnl
-from bot.markets import LiveMarket, fetch_live_market
-from bot.spot import FEED as SPOT, favored_side
+from strategy import store
+from strategy.book import fetch_book
+from strategy.config import load as load_cfg
+from strategy.fees import net_pnl
+from strategy.markets import LiveMarket, fetch_live_market
+from strategy.spot import FEED as SPOT, favored_side
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "trades.db"
@@ -716,7 +716,7 @@ def events(since_decision: int = Query(0), since_order: int = Query(0)):
 # Kanban view of the same data, mounted BEFORE the static UI so it isn't
 # shadowed by the catch-all mount. Mirrors the maker dashboard's pipeline shape
 # with taker-specific lanes and metrics.
-from server.taker_kanban import PAGE as _KANBAN_PAGE
+from server.kanban import PAGE as _KANBAN_PAGE
 
 
 @app.get("/kanban", response_class=HTMLResponse)
