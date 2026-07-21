@@ -34,3 +34,8 @@ research/*.json
 # --- macOS ---
 .DS_Store
 bot.mode
+
+# maker sim runtime
+maker.db
+maker.db-*
+maker.pid
