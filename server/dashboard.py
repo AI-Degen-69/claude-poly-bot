@@ -79,7 +79,7 @@ def _query(sql: str, params: tuple = ()) -> list[dict]:
 def recent_decisions(limit: int = 50, since_id: int = 0) -> list[dict]:
     return _query(
         "SELECT id, ts, market_slug, side, t_remaining, ask_price, ask_size, "
-        "action, reason, dry_run FROM decisions WHERE id > ? "
+        "action, reason, dry_run, count FROM decisions WHERE id > ? "
         "ORDER BY id DESC LIMIT ?",
         (since_id, limit),
     )

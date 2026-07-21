@@ -621,7 +621,13 @@ function DecisionsTable({ decisions }: { decisions: Decision[] }) {
             <Td>{d.side ?? '—'}</Td>
             <Td right>{fmtNum(d.t_remaining, 1)}s</Td>
             <Td right>{fmtPx(d.ask_price)}</Td>
-            <Td color={actionColor(d.action)} bold>{d.action}</Td>
+            <Td color={actionColor(d.action)} bold>
+              {d.action}
+              {/* run-collapsed: N identical consecutive evaluations */}
+              {d.count && d.count > 1 ? (
+                <span style={{ color: 'var(--txt-dim)', fontWeight: 400 }}> ×{d.count}</span>
+              ) : null}
+            </Td>
             <Td dim>{d.reason}</Td>
           </tr>
         ))}

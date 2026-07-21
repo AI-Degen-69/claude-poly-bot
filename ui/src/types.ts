@@ -36,6 +36,7 @@ export interface Position {
 }
 
 export interface Decision {
+  count?: number;
   id: number;
   ts: number;
   market_slug: string;
