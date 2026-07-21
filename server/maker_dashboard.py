@@ -3,10 +3,11 @@
 Self-contained HTML -- no build step, no shared components with the taker UI, so
 the two can never drift into each other.
 
-Layout mirrors what proved useful on the taker side (live market, order flow,
-decision log) plus the maker-only panels: fill quality, edge decomposition,
-inventory discipline, and a sample-size tracker so you can see at a glance
-whether the data is anywhere near conclusive.
+Laid out as a KANBAN PIPELINE: every market flows left to right through the
+stages it actually passes through --
+    DECIDE -> REST (quote on book) -> FILL -> HOLD (position) -> SETTLE
+New cards animate in, so you can watch work move down the pipeline rather than
+reading five disconnected tables.
 """
 from __future__ import annotations
 
@@ -41,14 +42,12 @@ def state():
     d = dict(_cache["data"])
     d["now"] = now
     d["live"] = store.get_live_state()
-    d["decisions"] = kpi.recent_decisions(50)
-    d["recent_fills"] = kpi.recent_fills(25)
+    d["decisions"] = kpi.recent_decisions(40)
+    d["recent_fills"] = kpi.recent_fills(30)
     d["config"] = {
         "quote_shares": cfg.quote_shares,
-        "ticks_below_ask": cfg.ticks_below_ask,
         "target_balance": cfg.target_balance,
         "max_pair_cost": cfg.max_pair_cost,
-        "max_fills_per_market": cfg.max_fills_per_market,
         "max_cost_per_market": cfg.max_cost_per_market,
     }
     return d
@@ -56,55 +55,90 @@ def state():
 
 PAGE = r"""
 <style>
- :root{--bg:#0b0d0e;--pan:#13171a;--bd:#232a2e;--tx:#d6dbd8;--dim:#79847f;
-       --am:#eda92c;--gn:#46c46a;--rd:#e2564f;--bl:#5b9bd5;--hi:#f2f5f3}
+ :root{--bg:#0a0c0d;--pan:#121618;--pan2:#161b1e;--bd:#232a2e;--tx:#d6dbd8;
+       --dim:#79847f;--am:#eda92c;--gn:#46c46a;--rd:#e2564f;--bl:#5b9bd5;
+       --pu:#9b7fd4}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--tx);
       font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
- /* ---- top bars ---- */
  .bar{display:flex;align-items:center;gap:12px;padding:7px 14px;
       border-bottom:1px solid var(--bd);background:var(--pan)}
  .bar b{color:var(--am);letter-spacing:1.4px}
  .chip{border:1px solid var(--gn);color:var(--gn);padding:1px 8px;font-size:10px;letter-spacing:1.4px}
- .samp{display:flex;align-items:center;gap:16px;padding:6px 14px;
-       border-bottom:1px solid var(--bd);background:#0e1214;flex-wrap:wrap}
- .samp .lab{color:var(--dim);font-size:10px;letter-spacing:1.2px}
- .tgt{display:flex;align-items:center;gap:6px;font-size:11px}
- .track{width:120px;height:7px;background:#1c2225;border:1px solid var(--bd);position:relative}
- .fillbar{height:100%;background:var(--bl)}
- /* ---- grid ---- */
- .wrap{display:grid;grid-template-columns:1.05fr 1.15fr 1.15fr;gap:9px;padding:9px;align-items:start}
- @media(max-width:1180px){.wrap{grid-template-columns:1fr}}
- .col{display:flex;flex-direction:column;gap:9px}
- .p{border:1px solid var(--bd);background:var(--pan)}
- .p h3{margin:0;padding:5px 10px;font-size:9.5px;letter-spacing:1.3px;color:var(--am);
-       border-bottom:1px solid var(--bd);font-weight:700;display:flex;justify-content:space-between}
- .p .b{padding:7px 10px}
- .r{display:flex;justify-content:space-between;padding:2px 0;gap:10px;align-items:baseline}
- .r span:first-child{color:var(--dim);font-size:10.5px}
- .r span:last-child{font-variant-numeric:tabular-nums}
- .big{font-size:19px;font-weight:700}
- .g{color:var(--gn)}.r_{color:var(--rd)}.a{color:var(--am)}.d{color:var(--dim)}.bl{color:var(--bl)}
- table{width:100%;border-collapse:collapse;font-size:10.5px}
- th{color:var(--dim);text-align:right;font-weight:400;padding:3px 4px;border-bottom:1px solid var(--bd)}
- th:first-child,td:first-child{text-align:left}
- td{padding:2px 4px;text-align:right;font-variant-numeric:tabular-nums;
-    border-bottom:1px solid #171c1f}
- .note{color:var(--dim);font-size:9.5px;padding:5px 10px 0;line-height:1.55}
- .scroll{max-height:290px;overflow:auto}
- .bookrow{display:flex;align-items:baseline;gap:10px;padding:3px 0;border-top:1px dashed var(--bd)}
- .warn{color:var(--am);font-size:10px;padding:4px 10px;border-top:1px solid var(--bd)}
+
+ /* ---------- sample-size bars (were broken: spans are inline, so width/height
+    were ignored entirely and the bar never reflected progress) ---------- */
+ .samp{display:flex;align-items:center;gap:18px;padding:7px 14px;
+       border-bottom:1px solid var(--bd);background:#0d1113;flex-wrap:wrap}
+ .lab{color:var(--dim);font-size:10px;letter-spacing:1.2px}
+ .tgt{display:inline-flex;align-items:center;gap:7px;font-size:11px}
+ .track{display:inline-block;width:130px;height:9px;background:#1b2124;
+        border:1px solid var(--bd);position:relative;overflow:hidden;vertical-align:middle}
+ .fillbar{display:block;height:100%;background:var(--bl);transition:width .6s ease}
+
+ /* ---------- kpi strip ---------- */
+ .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+       gap:7px;padding:9px 12px;border-bottom:1px solid var(--bd)}
+ .k{border:1px solid var(--bd);background:var(--pan);padding:6px 9px}
+ .k .n{color:var(--dim);font-size:9px;letter-spacing:.8px}
+ .k .v{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+ .k .s{color:var(--dim);font-size:9.5px}
+
+ /* ---------- kanban ---------- */
+ .kan{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:10px 12px;
+      align-items:start}
+ @media(max-width:1250px){.kan{grid-template-columns:repeat(2,1fr)}}
+ .lane{border:1px solid var(--bd);background:var(--pan);display:flex;
+       flex-direction:column;min-height:150px}
+ .lane h3{margin:0;padding:6px 9px;font-size:9.5px;letter-spacing:1.3px;
+          border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;
+          align-items:center;font-weight:700}
+ .lane .body{padding:6px;display:flex;flex-direction:column;gap:5px;
+             max-height:430px;overflow-y:auto}
+ .cnt{background:#1c2225;color:var(--dim);padding:0 6px;border-radius:8px;font-size:9px}
+
+ /* stage colours */
+ .l1 h3{color:var(--dim)}   .l1{border-top:2px solid #3a4145}
+ .l2 h3{color:var(--bl)}    .l2{border-top:2px solid var(--bl)}
+ .l3 h3{color:var(--pu)}    .l3{border-top:2px solid var(--pu)}
+ .l4 h3{color:var(--am)}    .l4{border-top:2px solid var(--am)}
+ .l5 h3{color:var(--gn)}    .l5{border-top:2px solid var(--gn)}
+
+ .card{background:var(--pan2);border:1px solid var(--bd);border-left:2px solid var(--bd);
+       padding:5px 7px;font-size:10.5px;line-height:1.5}
+ .card .top{display:flex;justify-content:space-between;gap:6px;align-items:baseline}
+ .card .sub{color:var(--dim);font-size:9.5px}
+ .card.up{border-left-color:var(--gn)} .card.dn{border-left-color:var(--rd)}
+ .card.win{border-left-color:var(--gn)} .card.loss{border-left-color:var(--rd)}
+ .card.skip{opacity:.62}
+ .num{font-variant-numeric:tabular-nums}
+ .g{color:var(--gn)}.r_{color:var(--rd)}.a{color:var(--am)}.d{color:var(--dim)}.bl{color:var(--bl)}.pu{color:var(--pu)}
+
+ /* cards slide in from the previous lane as work advances */
+ @keyframes flowin{
+   0%{opacity:0;transform:translateX(-26px) scale(.97)}
+   60%{opacity:1}
+   100%{opacity:1;transform:none}
+ }
+ .enter{animation:flowin .55s cubic-bezier(.22,.9,.3,1)}
+ @media (prefers-reduced-motion: reduce){ .enter{animation:none} }
+
+ .note{color:var(--dim);font-size:9.5px;padding:5px 9px;line-height:1.5;
+       border-top:1px solid var(--bd)}
+ .livebar{display:flex;gap:18px;align-items:center;padding:7px 14px;
+          border-bottom:1px solid var(--bd);background:var(--pan);flex-wrap:wrap}
 </style>
 
 <div class="bar">
   <b>MAKER_SIM</b><span class="d">·</span><span>BTC 5MIN</span>
   <span class="chip">PAPER · NO REAL ORDERS</span>
   <span id="live" class="d"></span>
-  <span style="flex:1"></span>
-  <span id="clock" class="d"></span>
+  <span style="flex:1"></span><span id="clock" class="d"></span>
 </div>
 <div class="samp" id="samp"></div>
-<div class="wrap" id="w">loading…</div>
+<div class="livebar" id="livebar"></div>
+<div class="kpis" id="kpis"></div>
+<div class="kan" id="kan"></div>
 
 <script>
 const $=(x)=>document.getElementById(x);
@@ -112,26 +146,34 @@ const usd=(v,d=2)=>v==null?'—':(v<0?'-':'')+'$'+Math.abs(v).toFixed(d);
 const pct=(v,d=1)=>v==null?'—':(v*100).toFixed(d)+'%';
 const num=(v,d=0)=>v==null?'—':Number(v).toFixed(d);
 const cls=(v)=>v==null?'':(v>=0?'g':'r_');
-const ago=(t)=>{if(!t)return'—';const s=Math.max(0,Date.now()/1000-t);
-  return s<60?Math.round(s)+'s':Math.round(s/60)+'m'};
-function row(k,v,c){return `<div class="r"><span>${k}</span><span class="${c||''}">${v}</span></div>`}
-function P(t,inner,extra){return `<div class="p"><h3><span>${t}</span><span class="d">${extra||''}</span></h3><div class="b">${inner}</div></div>`}
+const hhmm=(t)=>t?new Date(t*1000).toLocaleTimeString():'—';
+const seen={};                       // lane -> Set of ids already rendered
+
+function lane(id,title,cls_,cards,note){
+  const s=seen[id]=seen[id]||new Set();
+  const html=cards.map(c=>{
+    const isNew=!s.has(c.key); s.add(c.key);
+    return `<div class="card ${c.cls||''} ${isNew?'enter':''}">${c.html}</div>`;
+  }).join('');
+  return `<div class="lane ${cls_}"><h3><span>${title}</span>
+    <span class="cnt">${cards.length}</span></h3>
+    <div class="body">${html||'<div class="d" style="padding:6px">—</div>'}</div>
+    ${note?`<div class="note">${note}</div>`:''}</div>`;
+}
 
 function sampleBar(s){
-  const sm=s.sample||{}; const n=sm.n||0;
-  if(!sm.targets||!Object.keys(sm.targets).length){
-    return `<span class="lab">SAMPLE</span><span>${n} settled markets · need ≥2 to estimate targets</span>`;
-  }
-  let h=`<span class="lab">SAMPLE SIZE</span>
-    <span><b class="bl">${n}</b> settled</span>
-    <span class="d">mean ${usd(sm.mean)}/mkt · σ ${usd(sm.stdev)}</span>`;
+  const sm=s.sample||{}, n=sm.n||0;
+  if(!sm.targets||!Object.keys(sm.targets).length)
+    return `<span class="lab">SAMPLE</span><span>${n} settled · need ≥2 to estimate</span>`;
+  let h=`<span class="lab">SAMPLE SIZE</span><span><b class="bl">${n}</b> settled</span>
+         <span class="d">mean ${usd(sm.mean)}/mkt · σ ${usd(sm.stdev)}</span>`;
   for(const [lvl,t] of Object.entries(sm.targets)){
     const need=t.need, prog=need?Math.min(100,100*n/need):0;
     h+=`<span class="tgt"><span class="d">${lvl}</span>
-      <span class="track"><span class="fillbar" style="width:${prog}%;
+      <span class="track"><span class="fillbar" style="width:${prog.toFixed(1)}%;
         background:${t.reached?'var(--gn)':'var(--bl)'}"></span></span>
-      <span class="${t.reached?'g':''}">${t.reached?'REACHED':num(n)+'/'+(need==null?'∞':num(need))}</span>
-      ${t.reached?'':`<span class="d">(${t.eta_hours==null?'—':num(t.eta_hours,0)+'h)'}</span>`}</span>`;
+      <span class="${t.reached?'g':''}">${t.reached?'REACHED':n+'/'+(need==null?'∞':need)}</span>
+      ${t.reached?'':`<span class="d">${t.eta_hours==null?'':'('+num(t.eta_hours,0)+'h)'}</span>`}</span>`;
   }
   return h;
 }
@@ -139,143 +181,95 @@ function sampleBar(s){
 async function tick(){
   let s; try{ s=await (await fetch('/api/state',{cache:'no-store'})).json(); }catch(e){ return; }
   $('clock').textContent=new Date().toLocaleTimeString();
-  if(s.error){ $('w').innerHTML=P('ERROR',s.error); return; }
+  if(s.error){ $('kan').innerHTML='<div class="lane"><h3>ERROR</h3><div class="body">'+s.error+'</div></div>'; return; }
   const c=s.config||{}, L=s.live||{}, inv=L.inventory||{};
-  $('live').textContent = (L._age!=null && L._age<15) ? '● bot running' : '● bot idle';
-  $('live').className = (L._age!=null && L._age<15) ? 'g' : 'r_';
+  const alive=(L._age!=null&&L._age<15);
+  $('live').textContent=alive?'● bot running':'● bot idle';
+  $('live').className=alive?'g':'r_';
   $('samp').innerHTML=sampleBar(s);
 
-  /* ---------- column 1: money ---------- */
-  const acct=P('PAPER ACCOUNT',
-     row('EQUITY',usd(s.equity),'big '+cls(s.realized_pnl))
-   + row('starting',usd(s.bankroll),'d')
-   + row('realized P&L',usd(s.realized_pnl),cls(s.realized_pnl))
-   + row('ROI on turnover',pct(s.roi_on_cost,2),cls(s.roi_on_cost))
-   + row('rebate (est, not counted)',usd(s.rebate_est),'a')
-   + row('capital deployed',usd(s.cost),'d'));
+  /* ---- live market strip ---- */
+  const u=L.up||{},d=L.down||{};
+  $('livebar').innerHTML = L.market_slug ? `
+    <span class="lab">LIVE</span>
+    <a href="https://polymarket.com/event/${L.market_slug}" target="_blank"
+       style="color:var(--am);text-decoration:none">${L.market_slug} ↗</a>
+    <span class="a" style="font-size:16px;font-weight:700">${num(Math.max(0,L.t_remaining))}s</span>
+    <span class="d">UP</span><span class="g">${u.best_bid==null?'—':u.best_bid.toFixed(2)}</span>
+      <span class="d">/</span><span class="a">${u.best_ask==null?'—':u.best_ask.toFixed(2)}</span>
+    <span class="d">DOWN</span><span class="g">${d.best_bid==null?'—':d.best_bid.toFixed(2)}</span>
+      <span class="d">/</span><span class="a">${d.best_ask==null?'—':d.best_ask.toFixed(2)}</span>
+    <span style="flex:1"></span>
+    <span class="d">our book</span>
+    <span class="g">UP ${num(inv.up_shares)}@${num(inv.up_avg,3)}</span>
+    <span class="r_">DOWN ${num(inv.down_shares)}@${num(inv.down_avg,3)}</span>
+    <span class="d">pair</span><span class="${(inv.pair_cost||9)<1?'g':'d'}">${num(inv.pair_cost,4)}</span>
+    <span class="d">balance</span><span class="${(inv.balance||0)>=c.target_balance?'g':'a'}">${num(inv.balance,2)}</span>`
+    : '<span class="d">waiting for the bot…</span>';
 
-  const edge=P('WHERE THE MONEY COMES FROM',
-     row('spread capture',usd(s.spread_capture),'g')
-   + row('adverse selection',usd(s.adverse_selection),cls(s.adverse_selection))
-   + row('= realized P&L',usd(s.realized_pnl),'big '+cls(s.realized_pnl))
-   + row('avg edge vs mid',s.avg_edge_cents==null?'—':num(s.avg_edge_cents,2)+'¢','bl')
-   + `<div class="note">resting below mid earns the spread; getting picked off
-      pays some back. Their sum is the trading result.</div>`);
-
-  const fq=P('FILL QUALITY',''
-   + row('FILL RATE',pct(s.fill_rate),'big '+((s.fill_rate||0)>0.05?'g':'a'))
-   + row('posted / filled',num(s.posted_shares)+' / '+num(s.filled_shares)+' sh','d')
-   + row('median queue ahead',num(s.median_queue_ahead)+' sh')
-   + row('median time to fill',s.median_seconds_to_fill==null?'—':num(s.median_seconds_to_fill,1)+'s')
-   + `<div class="note">queue ahead = shares that had to clear before us.
-      A model that ignored this would report 100% and mean nothing.</div>`);
-
-  const invp=P('INVENTORY DISCIPLINE',
-     row('median balance',num(s.median_balance,3)+' / '+c.target_balance,
+  /* ---- kpi strip ---- */
+  const K=(n,v,sub,cl)=>`<div class="k"><div class="n">${n}</div>
+      <div class="v ${cl||''}">${v}</div><div class="s">${sub||''}</div></div>`;
+  $('kpis').innerHTML =
+      K('EQUITY',usd(s.equity),'from '+usd(s.bankroll),cls(s.realized_pnl))
+    + K('REALIZED P&L',usd(s.realized_pnl),pct(s.roi_on_cost,2)+' of turnover',cls(s.realized_pnl))
+    + K('SPREAD CAPTURE',usd(s.spread_capture),num(s.avg_edge_cents,2)+'¢ avg edge','g')
+    + K('ADVERSE SELECTION',usd(s.adverse_selection),'cost of being picked off',cls(s.adverse_selection))
+    + K('FILL RATE',pct(s.fill_rate),num(s.median_queue_ahead)+' sh queue ahead','bl')
+    + K('BALANCE',num(s.median_balance,3),'target '+c.target_balance,
         (s.median_balance||0)>=c.target_balance?'g':'a')
-   + row('median pair cost',num(s.median_pair_cost,4),
+    + K('PAIR COST',num(s.median_pair_cost,4),'pays $1.00',
         (s.median_pair_cost||9)<1?'g':'r_')
-   + row('pairs under $1.00',s.pairs_under_1==null?'—':num(s.pairs_under_1,0)+'%')
-   + `<div class="note">a pair pays exactly $1.00. Buying it below that is
-      locked profit on the hedged part — powerwinner runs 0.9990 at 0.923 balance.</div>`);
+    + K('WIN RATE',pct(s.win_rate),s.wins+'W / '+s.losses+'L')
+    + K('REBATE (est)',usd(s.rebate_est),'not counted in P&L','a');
 
-  const res=P('RESULT',
-     row('markets settled',num(s.markets_settled))
-   + row('win / loss',num(s.wins)+' / '+num(s.losses))
-   + row('win rate',pct(s.win_rate))
-   + row('avg win',usd(s.avg_win),'g')
-   + row('avg loss',usd(s.avg_loss),'r_')
-   + `<div class="note">a maker normally LOSES more markets than it wins —
-      the spread makes up the difference. powerwinner wins just 41.4%.</div>`);
+  /* ---- kanban: DECIDE -> REST -> FILL -> HOLD -> SETTLE ---- */
+  const decide=(s.decisions||[]).slice(0,14).map(x=>({
+    key:'d'+x.id, cls:(x.action==='QUOTE'?'':'skip'),
+    html:`<div class="top"><span class="${x.action==='QUOTE'?'bl':'d'}">${x.action}${x.count>1?' <span class="d">×'+x.count+'</span>':''}</span>
+      <span class="d">${hhmm(x.ts)}</span></div>
+      <div class="sub">${(x.reason||'').slice(0,42)}</div>`}));
 
-  const pace=P('PACE · vs powerwinner',
-     row('markets quoted / filled',num(s.markets_quoted)+' / '+num(s.markets_filled))
-   + row('fills',num(s.fills))
-   + row('fills/day',s.fills_per_day==null?'—':num(s.fills_per_day),'d')
-   + row('his fills/day','8,351','d')
-   + row('notional/day',s.notional_per_day==null?'—':usd(s.notional_per_day,0),'d')
-   + row('his notional/day','$398k','d')
-   + row('running',num(s.days,2)+'d','d'));
+  const rest=(L.open_quotes||[]).map((q,i)=>({
+    key:'q'+q.side+q.price, cls:(q.side==='UP'?'up':'dn'),
+    html:`<div class="top"><span class="${q.side==='UP'?'g':'r_'}">${q.side} @ ${q.price.toFixed(2)}</span>
+      <span class="num">${num(q.size)} sh</span></div>
+      <div class="sub">queue ahead <span class="${q.queue_ahead>0?'a':'g'}">${num(q.queue_ahead)}</span>
+      · filled ${num(q.filled)}</div>`}));
 
-  /* ---------- column 2: live market ---------- */
-  let book='<div class="d">waiting for the bot…</div>';
-  if(L.market_slug){
-    const mk=(sd,o)=>`<div class="bookrow">
-      <span class="d" style="width:44px">${sd}</span>
-      <span class="d" style="font-size:10px">BID</span>
-      <span class="g" style="font-weight:700">${o.best_bid==null?'—':o.best_bid.toFixed(2)}</span>
-      <span class="d" style="font-size:10px">ASK</span>
-      <span class="a" style="font-weight:700">${o.best_ask==null?'—':o.best_ask.toFixed(2)}</span>
-      <span style="flex:1"></span>
-      <span class="d" style="font-size:10px">depth ${num(o.bid_depth)}</span></div>`;
-    book = row('COUNTDOWN', num(Math.max(0,L.t_remaining),0)+'s','big '+((L.t_remaining||0)<60?'a':''))
-      + mk('UP',L.up||{}) + mk('DOWN',L.down||{});
+  const fills=(s.recent_fills||[]).slice(0,14).map(f=>({
+    key:'f'+f.id, cls:(f.side==='UP'?'up':'dn'),
+    html:`<div class="top"><span class="${f.side==='UP'?'g':'r_'}">${f.side} @ ${(f.price||0).toFixed(2)}</span>
+      <span class="num">${num(f.size)} sh</span></div>
+      <div class="sub">edge <span class="bl">${f.edge_vs_mid==null?'—':(f.edge_vs_mid*100).toFixed(2)+'¢'}</span>
+      · waited ${num(f.queue_waited)} sh · ${hhmm(f.ts)}</div>`}));
+
+  const hold=[];
+  if(inv.fills){
+    const risk=(inv.up_shares||0)-(inv.down_shares||0);
+    hold.push({key:'h'+(L.condition_id||''),cls:(inv.balance>=c.target_balance?'win':''),
+      html:`<div class="top"><span class="a">${(L.market_slug||'').slice(-8)}</span>
+        <span class="num">${num(inv.fills)} fills</span></div>
+        <div class="sub">UP ${num(inv.up_shares)} · DOWN ${num(inv.down_shares)}</div>
+        <div class="sub">pair <span class="${(inv.pair_cost||9)<1?'g':'d'}">${num(inv.pair_cost,4)}</span>
+          · balance <span class="${(inv.balance||0)>=c.target_balance?'g':'a'}">${num(inv.balance,2)}</span></div>
+        <div class="sub">unhedged <span class="${Math.abs(risk)>60?'r_':'d'}">${num(Math.abs(risk))} sh</span>
+          · cost ${usd(inv.cost,0)}</div>`});
   }
-  const liveP=P(L.market_slug?('LIVE MARKET · '+L.market_slug):'LIVE MARKET', book,
-                L.market_slug?('<a style="color:var(--am);text-decoration:none" target="_blank" href="https://polymarket.com/event/'+L.market_slug+'">open ↗</a>'):'');
 
-  let oq='<div class="d">no resting quotes</div>';
-  if((L.open_quotes||[]).length){
-    oq='<table><tr><th>SIDE</th><th>PRICE</th><th>SIZE</th><th>FILLED</th><th>QUEUE AHEAD</th></tr>';
-    L.open_quotes.forEach(q=>{oq+=`<tr>
-      <td class="${q.side==='UP'?'g':'r_'}">${q.side}</td><td>${q.price.toFixed(2)}</td>
-      <td>${num(q.size)}</td><td>${num(q.filled)}</td>
-      <td class="${q.queue_ahead>0?'a':'g'}">${num(q.queue_ahead)}</td></tr>`});
-    oq+='</table>';
-  }
-  const invNow=P('OUR BOOK · this market',
-      row('UP',num(inv.up_shares)+' sh @ '+num(inv.up_avg,3),'g')
-    + row('DOWN',num(inv.down_shares)+' sh @ '+num(inv.down_avg,3),'r_')
-    + row('pair cost',num(inv.pair_cost,4),(inv.pair_cost||9)<1?'g':'d')
-    + row('balance',num(inv.balance,2),(inv.balance||0)>=c.target_balance?'g':'a')
-    + row('cost / fills',usd(inv.cost)+' / '+num(inv.fills),'d'));
+  const settle=(s.settlements||[]).slice(0,14).map(x=>({
+    key:'s'+x.slug, cls:(x.pnl>=0?'win':'loss'),
+    html:`<div class="top"><span class="d">…${(x.slug||'').slice(-8)}</span>
+      <span class="${x.pnl>=0?'g':'r_'}" style="font-weight:700">${x.pnl>=0?'+':''}${usd(x.pnl)}</span></div>
+      <div class="sub">UP ${num(x.up_sh)} / DN ${num(x.dn_sh)} · bal ${num(x.balance,2)}</div>
+      <div class="sub">cost ${usd(x.cost,0)} → paid ${usd(x.payout,0)}</div>`}));
 
-  const quotesP=P('RESTING QUOTES',oq);
-
-  /* ---------- column 3: flow ---------- */
-  let fl='<div class="d">no fills yet</div>';
-  if((s.recent_fills||[]).length){
-    fl='<div class="scroll"><table><tr><th>TIME</th><th>SIDE</th><th>PX</th><th>SH</th><th>EDGE</th><th>QUEUE</th></tr>';
-    s.recent_fills.forEach(f=>{fl+=`<tr>
-      <td class="d">${new Date(f.ts*1000).toLocaleTimeString()}</td>
-      <td class="${f.side==='UP'?'g':'r_'}">${f.side}</td>
-      <td>${(f.price||0).toFixed(2)}</td><td>${num(f.size)}</td>
-      <td class="bl">${f.edge_vs_mid==null?'—':(f.edge_vs_mid*100).toFixed(2)+'¢'}</td>
-      <td class="d">${num(f.queue_waited)}</td></tr>`});
-    fl+='</table></div>';
-  }
-  const fillsP=P('FILL FLOW','' + fl);
-
-  let dl='<div class="d">no decisions yet</div>';
-  if((s.decisions||[]).length){
-    dl='<div class="scroll"><table><tr><th>TIME</th><th>ACTION</th><th>SIDE</th><th>PX</th><th>REASON</th></tr>';
-    s.decisions.forEach(d=>{
-      const isQ=d.action==='QUOTE';
-      dl+=`<tr><td class="d">${new Date(d.ts*1000).toLocaleTimeString()}</td>
-        <td class="${isQ?'g':'d'}">${d.action}${d.count>1?' <span class="d">×'+d.count+'</span>':''}</td>
-        <td class="${d.side==='UP'?'g':(d.side==='DOWN'?'r_':'d')}">${d.side||'—'}</td>
-        <td>${d.price==null?'—':d.price.toFixed(2)}</td>
-        <td class="d" style="text-align:left">${(d.reason||'').slice(0,44)}</td></tr>`});
-    dl+='</table></div>';
-  }
-  const decP=P('DECISION LOG · why we quote or skip', dl);
-
-  let t='<div class="d">no settled markets yet</div>';
-  if((s.settlements||[]).length){
-    t='<div class="scroll"><table><tr><th>MARKET</th><th>UP/DN</th><th>BAL</th><th>COST</th><th>PAID</th><th>P&L</th></tr>';
-    s.settlements.forEach(x=>{t+=`<tr>
-      <td class="d">…${(x.slug||'').slice(-8)}</td>
-      <td class="d">${num(x.up_sh)}/${num(x.dn_sh)}</td>
-      <td>${num(x.balance,2)}</td><td>${usd(x.cost,0)}</td><td>${usd(x.payout,0)}</td>
-      <td class="${x.pnl>=0?'g':'r_'}">${x.pnl>=0?'+':''}${usd(x.pnl)}</td></tr>`});
-    t+='</table></div>';
-  }
-  const setP=P('SETTLEMENTS',t);
-
-  $('w').innerHTML =
-     `<div class="col">${acct}${edge}${fq}${invp}</div>`
-   + `<div class="col">${liveP}${invNow}${quotesP}${res}${pace}</div>`
-   + `<div class="col">${fillsP}${decP}${setP}</div>`;
+  $('kan').innerHTML =
+      lane('l1','① DECIDE','l1',decide,'why we quote or skip')
+    + lane('l2','② REST ON BOOK','l2',rest,'our bids waiting in the queue')
+    + lane('l3','③ FILL','l3',fills,'someone traded against us')
+    + lane('l4','④ HOLD','l4',hold,'position carried into resolution')
+    + lane('l5','⑤ SETTLE','l5',settle,'market resolved · $1.00 or $0.00');
 }
 tick(); setInterval(tick,2000);
 </script>

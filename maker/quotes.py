@@ -75,8 +75,16 @@ def decide_quotes(
         return [], f"t_remaining {t_remaining:.0f}s < {cfg.min_t_remaining_sec:.0f}s"
     if inv.fills >= cfg.max_fills_per_market:
         return [], f"hit {cfg.max_fills_per_market} fills for this market"
-    if inv.cost >= cfg.max_cost_per_market:
-        return [], f"market cost cap ${cfg.max_cost_per_market:.0f} reached"
+
+    # At the cost cap we may still buy the LIGHTER side. Measured over 44
+    # settled markets: perfectly hedged markets averaged +$30.70 while badly
+    # unbalanced ones averaged -$50.95 (hedged +$409 total vs unbalanced -$848).
+    # The old rule stopped ALL quoting at the cap, which froze whatever
+    # imbalance we happened to hold -- the single biggest loss driver. Buying
+    # the light side REDUCES exposure, so the cap must not block it.
+    balancing_only = inv.cost >= cfg.max_cost_per_market
+    if balancing_only and inv.balance >= cfg.target_balance:
+        return [], f"cost cap ${cfg.max_cost_per_market:.0f} reached and balanced"
 
     out: list[QuoteIntent] = []
     for side, book, tok in (
@@ -98,19 +106,31 @@ def decide_quotes(
         if abs(mid - price) > cfg.max_spread_from_mid:
             continue
 
-        # Never build a pair that costs >= $1.00 for a $1.00 payout.
+        # Never BUILD a pair that costs >= $1.00 for a $1.00 payout -- but this
+        # must not block a HEDGE. Measured: badly unbalanced markets averaged
+        # -$50.95 with a swing of only 7.28, i.e. they lose CONSISTENTLY, not
+        # randomly. Our fills are adversely selected (we end up heavy on the
+        # side that loses), so leaving an imbalance open is reliably worse than
+        # locking in zero. Only apply the pair cap when adding to the heavy or
+        # balanced side.
+        mine_sh = inv.up_shares if side == "UP" else inv.down_shares
+        theirs_sh = inv.down_shares if side == "UP" else inv.up_shares
+        is_hedge = theirs_sh > mine_sh and inv.balance < cfg.target_balance
         other = "DOWN" if side == "UP" else "UP"
         other_avg = inv.avg(other)
-        if other_avg > 0 and (price + other_avg) >= cfg.max_pair_cost:
+        if (not is_hedge) and other_avg > 0 and (price + other_avg) >= cfg.max_pair_cost:
             continue
 
         # Inventory control: if we're already heavy on this side, only quote
         # the lighter one until balance recovers.
-        if inv.up_shares > 0 or inv.down_shares > 0:
-            mine = inv.up_shares if side == "UP" else inv.down_shares
-            theirs = inv.down_shares if side == "UP" else inv.up_shares
+        mine = inv.up_shares if side == "UP" else inv.down_shares
+        theirs = inv.down_shares if side == "UP" else inv.up_shares
+        if (inv.up_shares > 0 or inv.down_shares > 0):
             if mine > theirs and inv.balance < cfg.target_balance:
                 continue
+        # Past the cost cap we ONLY add to the light side, never the heavy one.
+        if balancing_only and mine >= theirs:
+            continue
 
         out.append(QuoteIntent(
             side=side, token_id=tok, price=price, size=cfg.quote_shares,
