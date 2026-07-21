@@ -26,3 +26,4 @@ bottom. One bullet per concrete thing done, tried, found, or broken.
 * Collapsed the decision log's consecutive duplicates — 93.2% of rows were repeats; ~15× fewer rows with counts preserved exactly.
 * Split the repo: taker and maker now live in separate repos under `AI Trading/`, with identical structure (`strategy/`, `server/`, `research/`, `deploy/`).
 * **Live result at 74 settled markets:** win rate 91.9% [83.4–96.2] vs 94.2% breakeven, net −$345.75. Only the 0.80–0.90 band has positive edge. Live gate audit shows ≥10bps 93.3% (n=15) vs <10bps 91.5% (n=59) — much weaker separation than the backtest. **Inconclusive, ~126 more markets needed.**
+* Removed `maker/` from this repo — the maker now runs from its own repo and its own Railway service, verified live before deletion so a working copy always existed.
