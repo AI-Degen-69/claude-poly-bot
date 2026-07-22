@@ -98,3 +98,28 @@ audit shows >=10bps at 93.3% (n=15) versus <10bps at 91.5% (n=59) - far weaker
 separation than the backtest, though the sample is small.
 
 **Verdict.** OPEN - inconclusive, ~126 more markets needed for a 90% call.
+
+## Session 2 — 2026-07-22 (gate retest, fresh data)
+
+### Does the Binance spot gate earn its place on fresh, non-overlapping data?
+
+**Method.** Built a read-only harness (`strategy/backtest_gate.py`) that reconstructs the gate's *mechanism* historically: for each 5-min window on a fresh range (2026-07-21 → 2026-07-23, excluding the 584-window backtest set), resolve the outcome via `/events?slug=btc-updown-5m-<open_ts>`, and compare it to the sign of Binance BTCUSDT's move from window open to t-120s (the live gate's decision point). `ungated` = spot-direction accuracy over all windows; `gated` = accuracy restricted to windows where |move| ≥ 5bps; `coverage` = fraction of windows the gate passes. 474 windows resolved (07-23 is future, skipped), 0 spot-data gaps.
+
+**Result.**
+
+| condition | n | accuracy | coverage |
+|---|---|---|---|
+| ungated (all windows) | 474 | 77.0% | 100% |
+| gated (\|bps\| ≥ 5) | 191 | 92.7% | 40.3% |
+
+Reproduces the SHAPE of the original backtest (which claimed 81.3% ungated → 96.0% gated over 584 windows) but at lower absolute levels: fresh gated accuracy is 92.7%, not 96.0%. The lift is real (+15.7 pts) but the gated subset sits BELOW the taker's ~94.3% fee breakeven, so the gate as a standalone win-rate improver does not clear the bar on fresh data.
+
+Caveat: this harness audits the SPOT-DIRECTION signal only. The original 81→96 number was the BOOK-FAVOURED-SIDE + gate combo, which cannot be reconstructed offline (CLOB `/book` is live-only, no timestamp param). That combo still needs a forward collector (~300 windows ≈ 25h).
+
+**Verdict.** PARKED — the spot signal is not dead (it separates 77→93 on brand-new data), but its standalone magnitude is below breakeven, so it does not by itself justify keeping the gate active. The decisive book-favoured-side combo is still untested; revisit only after the forward collector lands. Until then the gate is not load-bearing.
+
+### Instrumentation bugs in the harness (each would have faked the result)
+
+- `/events?series_slug=` returns 2025-era windows oldest-first and is unreliable for recent history → switched to direct per-window slug lookup `btc-updown-5m-<open_ts>` (the resolver's proven path).
+- The per-window market slug is `btc-updown-5m` (no "or"); using the series string `btc-up-or-down-5m` made every lookup 404 (resolved=0).
+- **Verdict.** DEAD (fixed) — both would have produced a fake zeros / overfit result.

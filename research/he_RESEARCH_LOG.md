@@ -25,3 +25,9 @@
 הממצאים המלאים, כולל כל הטבלאות והמספרים, מופיעים בעברית ב-
 [he_RESEARCH_SUMMARY.md](he_RESEARCH_SUMMARY.md) ובאנגלית ב-
 [RESEARCH_LOG.md](RESEARCH_LOG.md).
+
+## מפגש 2 — 22/07/2026 (בדיקה חוזרת של השער, נתונים חדשים)
+
+הממצאים המלאים, כולל כל הטבלאות והמספרים, מופיעים בעברית ב-
+[he_RESEARCH_SUMMARY.md](he_RESEARCH_SUMMARY.md) ובאנגלית ב-
+[RESEARCH_LOG.md](RESEARCH_LOG.md).
