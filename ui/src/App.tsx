@@ -218,7 +218,26 @@ function BottomBar({ state }: { state: State | null }) {
       {errKeys.length > 0 && (
         <span style={{ color: 'var(--red)' }}>ERR: {errKeys.join(', ')}</span>
       )}
+      <DeployFooter />
     </div>
+  );
+}
+
+// Injected at build time by the Dockerfile (window.__DEPLOY__ = {sha,railway}).
+declare global {
+  interface Window {
+    __DEPLOY__?: { sha?: string; railway?: string };
+  }
+}
+
+function DeployFooter() {
+  const d = typeof window !== 'undefined' ? window.__DEPLOY__ : undefined;
+  if (!d || (!d.sha && !d.railway)) return null;
+  return (
+    <span style={{ color: 'var(--txt-dim)' }}>
+      {d.sha ? `· sha ${d.sha.slice(0, 8)}` : ''}
+      {d.railway ? ` · rly ${d.railway.slice(0, 8)}` : ''}
+    </span>
   );
 }
 

@@ -70,6 +70,28 @@ def preflight() -> None:
                 f"volume at that directory (Settings -> Volumes -> /data)."
             )
 
+    # 1b. Collector DB (separate file, same volume). The gate-collector writes
+    #     ONLY here; it never touches trades.db, so there is no two-writer clash
+    #     with the bot (DEPLOY.md's warning is about the SAME db, not two dbs).
+    collector_db = os.environ.get("COLLECTOR_DB", "/data/collector.db")
+    if not store.USE_TURSO:
+        try:
+            from pathlib import Path as _P
+            _p = _P(collector_db)
+            _p.parent.mkdir(parents=True, exist_ok=True)
+            import sqlite3 as _sql
+            with _sql.connect(str(_p)) as _c:
+                _c.execute("CREATE TABLE IF NOT EXISTS _preflight (x INTEGER)")
+                _c.execute("INSERT INTO _preflight VALUES (1)")
+                _c.execute("DELETE FROM _preflight")
+            print(f"[preflight] collector DB OK: {collector_db} is writable",
+                  flush=True)
+        except Exception as e:
+            problems.append(
+                f"COLLECTOR_DB={collector_db} is not writable ({e}). The "
+                f"gate-collector needs a writable path on the mounted volume."
+            )
+
     # 2. Binance reachability. The spot gate IS the strategy; if Binance geo-
     #    blocks this region the gate fails closed and we collect zero fills
     #    forever while looking perfectly healthy.
@@ -157,6 +179,25 @@ def run_bot() -> None:
         time.sleep(RESTART_BACKOFF)
 
 
+def run_collector() -> None:
+    """Run the forward gate-collector, restarting it if it exits.
+
+    Writes ONLY to COLLECTOR_DB (default /data/collector.db) -- a separate file
+    from the bot's trades.db, so the two never contend. It is a read-only
+    observer of the live market; it never places orders.
+    """
+    env = dict(os.environ, PYTHONPATH=str(ROOT),
+               COLLECTOR_DB=os.environ.get("COLLECTOR_DB", "/data/collector.db"))
+    while True:
+        print("[collector] starting (read-only gate collector)", flush=True)
+        proc = subprocess.Popen([sys.executable, "-m", "strategy.collect_gate"],
+                                cwd=str(ROOT), env=env)
+        code = proc.wait()
+        print(f"[collector] exited code={code}; restarting in {RESTART_BACKOFF}s",
+              flush=True)
+        time.sleep(RESTART_BACKOFF)
+
+
 def main() -> None:
     # `--preflight` runs the checks and exits: use it to validate a host's
     # region/config before committing to a full deploy.
@@ -165,6 +206,7 @@ def main() -> None:
         return
     preflight()
     threading.Thread(target=run_bot, name="bot", daemon=True).start()
+    threading.Thread(target=run_collector, name="collector", daemon=True).start()
     threading.Thread(target=prune_loop, name="prune", daemon=True).start()
 
     import uvicorn

@@ -123,3 +123,39 @@ Caveat: this harness audits the SPOT-DIRECTION signal only. The original 81→96
 - `/events?series_slug=` returns 2025-era windows oldest-first and is unreliable for recent history → switched to direct per-window slug lookup `btc-updown-5m-<open_ts>` (the resolver's proven path).
 - The per-window market slug is `btc-updown-5m` (no "or"); using the series string `btc-up-or-down-5m` made every lookup 404 (resolved=0).
 - **Verdict.** DEAD (fixed) — both would have produced a fake zeros / overfit result.
+
+## Session 3 — 2026-07-22 (forward gate-collector built)
+
+### Can we collect the live book-favoured-side + spot-gate combo forward?
+
+**Method.** Built `strategy/collect_gate.py`: a read-only 24/7 observer that runs
+in the SAME Railway container as the bot but writes to a **separate** SQLite
+file (`COLLECTOR_DB`, default `/data/collector.db`) — never `trades.db`, so it
+avoids the documented two-writer clash. At `t_remaining == 120s` it snapshots
+the CLOB top-of-book for both sides (`bid_up/bid_down/ask_up/ask_down`),
+computes `book_favored`, and records `spot_bps` (Binance REST move vs window
+open) + `spot_favored`. At resolution it records the winner via the same
+gamma lookup the resolver uses, then derives `hit_book` (book_favored == winner)
+and `hit_gate` (|spot_bps|≥5 AND spot_favored == winner) — exactly the
+ungated-vs-gated comparison the backtest measured, now forward.
+
+Supervised as a second `run_service.py` subprocess (restart-on-death, same
+pattern as the bot). Plumbed into the dashboard as `/collector` — a
+server-rendered kanban-style flow (WATCH→GATE→FIRE→HOLD→SETTLE) reading
+`/api/collector-state`, plus a `/api/deploy-hook` that relays Railway deploy
+events to Discord and a deploy footer (git SHA + Railway deploy ID) on every
+page.
+
+**Verified locally** (real Polymarket/Binance from dev host): live market +
+book + Binance ticker all fetch; a forced snapshot row writes
+(`book_fav=DOWN, spot_bps=-16.9, spot_fav=DOWN`); a known-resolved window
+resolves to `winner=DOWN, hit_book=0, hit_gate=0, status=RESOLVED`. Schema bug
+(`hit_book`/`hit_gate` columns missing) found and fixed during the test.
+
+**Result.** Collector is LIVE in the container, collecting ~300 windows ≈ 25h.
+No findings yet — the sample is being built. The dashboard now shows
+ungated book-accuracy vs gated accuracy building up window-by-window.
+
+**Verdict.** LIVE — design complete and shipped; awaiting the fresh sample to
+settle the OPEN question from Session 2 (does the book-favoured-side + gate
+combo actually hit ~96% forward?).

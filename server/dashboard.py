@@ -709,6 +709,119 @@ def events(since_decision: int = Query(0), since_order: int = Query(0)):
 
 
 # ---------------------------------------------------------------------------
+# Deploy metadata (footer). DEPLOY_SHA is set at deploy time via
+# `railway variables set DEPLOY_SHA=<git sha>`; RAILWAY_DEPLOYMENT_ID is
+# injected automatically by Railway into every container.
+# ---------------------------------------------------------------------------
+DEPLOY_META = {
+    "deploy_sha": os.environ.get("DEPLOY_SHA", "unknown"),
+    "railway_deploy_id": os.environ.get("RAILWAY_DEPLOYMENT_ID", "unknown"),
+}
+
+
+@app.get("/api/meta")
+def meta():
+    return DEPLOY_META
+
+
+# ---------------------------------------------------------------------------
+# Gate-collector read-only state. Reads COLLECTOR_DB (a SEPARATE sqlite file
+# from trades.db) built by strategy.collect_gate. Never writes.
+# ---------------------------------------------------------------------------
+COLLECTOR_DB_PATH = os.environ.get("COLLECTOR_DB", "/data/collector.db")
+
+
+def _collector_state() -> dict:
+    import sqlite3 as _sql
+    from pathlib import Path as _P
+
+    p = _P(COLLECTOR_DB_PATH)
+    if not p.exists():
+        return {
+            "db": str(p),
+            "present": False,
+            "windows": [],
+            "stats": {"n": 0, "resolved": 0, "hit_book": 0, "hit_gate": 0,
+                      "gate_coverage": 0.0, "book_acc": None, "gate_acc": None},
+        }
+    try:
+        con = _sql.connect(str(p), timeout=2.0)
+        rows = con.execute(
+            "SELECT condition_id, market_slug, snap_ts, book_favored, spot_bps, "
+            "spot_favored, winner, resolved_ts, status, hit_book, hit_gate "
+            "FROM collector_windows ORDER BY snap_ts DESC LIMIT 200"
+        ).fetchall()
+        con.close()
+    except Exception as e:
+        return {"db": str(p), "present": True, "error": str(e),
+                "windows": [], "stats": {}}
+
+    windows = [
+        {
+            "condition_id": r[0], "market_slug": r[1], "snap_ts": r[2],
+            "book_favored": r[3], "spot_bps": r[4], "spot_favored": r[5],
+            "winner": r[6], "resolved_ts": r[7], "status": r[8],
+            "hit_book": bool(r[9]), "hit_gate": bool(r[10]),
+        }
+        for r in rows
+    ]
+    resolved = [w for w in windows if w["status"] == "RESOLVED"]
+    n = len(resolved)
+    hit_book = sum(1 for w in resolved if w["hit_book"])
+    hit_gate = sum(1 for w in resolved if w["hit_gate"])
+    gate_cov = sum(1 for w in resolved if w["spot_bps"] is not None
+                   and abs(w["spot_bps"]) >= 5.0)
+    return {
+        "db": str(p), "present": True,
+        "windows": windows,
+        "stats": {
+            "n": n,
+            "open": len(windows) - n,
+            "hit_book": hit_book,
+            "hit_gate": hit_gate,
+            "gate_coverage": round(100.0 * gate_cov / n, 1) if n else 0.0,
+            "book_acc": round(100.0 * hit_book / n, 1) if n else None,
+            "gate_acc": round(100.0 * hit_gate / n, 1) if n else None,
+        },
+    }
+
+
+@app.get("/api/collector-state")
+def collector_state():
+    return _collector_state()
+
+
+# ---------------------------------------------------------------------------
+# Deploy webhook relay. Railway project webhooks POST deploy events here; we
+# forward a short summary to Discord if DISCORD_WEBHOOK is configured. This
+# closes the verification loop: every redeploy announces itself.
+# ---------------------------------------------------------------------------
+from fastapi import Request  # noqa: E402  (imported late to keep top clean)
+
+
+@app.post("/api/deploy-hook")
+async def deploy_hook(req: Request):
+    try:
+        payload = await req.json()
+    except Exception:
+        payload = {}
+    hook = os.environ.get("DISCORD_WEBHOOK")
+    summary = (
+        f"🚀 deploy event on polymarket-taker\n"
+        f"sha={DEPLOY_META['deploy_sha']} "
+        f"railway={DEPLOY_META['railway_deploy_id']}\n"
+        f"type={payload.get('type')} status={payload.get('status')}"
+    )
+    if hook:
+        try:
+            requests.post(hook, json={"content": summary}, timeout=5)
+        except Exception as e:
+            return {"ok": False, "relayed": False, "error": str(e)}
+        return {"ok": True, "relayed": True}
+    return {"ok": True, "relayed": False, "note": "no DISCORD_WEBHOOK set"}
+
+
+# ---------------------------------------------------------------------------
 # Static UI (production). In dev the Vite server on :5173 proxies /api here;
 # in the container there is no Vite, so FastAPI serves the built bundle itself.
 # Mounted LAST so it never shadows an /api/* route.
@@ -717,11 +830,17 @@ def events(since_decision: int = Query(0), since_order: int = Query(0)):
 # shadowed by the catch-all mount. Mirrors the maker dashboard's pipeline shape
 # with taker-specific lanes and metrics.
 from server.kanban import PAGE as _KANBAN_PAGE
+from server.collector_page import PAGE as _COLLECTOR_PAGE
 
 
 @app.get("/kanban", response_class=HTMLResponse)
 def kanban():
     return _KANBAN_PAGE
+
+
+@app.get("/collector", response_class=HTMLResponse)
+def collector():
+    return _COLLECTOR_PAGE
 
 
 _UI_DIST = ROOT / "ui" / "dist"

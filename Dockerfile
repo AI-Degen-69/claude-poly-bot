@@ -16,6 +16,15 @@ RUN npm ci --no-audit --no-fund
 COPY ui/ ./
 RUN npm run build
 
+# Inject deploy metadata into the built HTML so the dashboard footer can show
+# which commit + Railway deployment is live. DEPLOY_SHA is passed via build arg
+# (set from the git SHA before `railway up`); RAILWAY_DEPLOYMENT_ID is injected
+# automatically by Railway during the build. If either is missing, the footer
+# simply stays hidden (DeployFooter returns null).
+ARG DEPLOY_SHA=unknown
+RUN RLY_ID="${RAILWAY_DEPLOYMENT_ID:-unknown}" && \
+    sed -i "s#</body>#<script>window.__DEPLOY__={sha:\"${DEPLOY_SHA}\",railway:\"${RLY_ID}\"};</script></body>#" dist/index.html
+
 # ---- stage 2: runtime -----------------------------------------------------
 FROM python:3.12-slim
 WORKDIR /app
