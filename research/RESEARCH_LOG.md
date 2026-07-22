@@ -193,3 +193,25 @@ Green now means *meets the benchmark* (book ≥81%, gate ≥94%, gap >0), not 10
 
 **Verdict.** LIVE — documentation/UX only; thresholds are explicit and match
 the backtest claim (81→96) and the taker fee breakeven (~94%).
+
+### Session 3 closeout + 24h handoff
+
+**Status at wrap (2026-07-22 ~23:40).** All three deliverables shipped and
+verified live; collector is self-healing in the Railway cloud (not on the
+user's PC — a local PC restart does not affect it):
+- commit `7e0d248` == origin/main; `DEPLOY_SHA=7e0d248`; live deploy `a41c8c8e`.
+- `bot_running=True`, `collector_running=True` (paper).
+- collector.db intact, **33 windows resolved** (was 19 earlier same session);
+  last snapshot ~170s before check → actively collecting.
+- `/collector` renders glossary + two-flame verdict strip (BOOK HEAT ≥81%,
+  GATE HEAT ≥94%).
+
+**What user does in ~24h:** open `/collector`. Read `WINDOWS RESOLVED` and the
+two flames:
+- ≥150 resolved + 🔥🔥 both flames (BOOK HEAT ≥81%, GATE HEAT ≥94%) → gate
+  VALIDATED (KEEP).
+- flames not both lit / GATE GAP ≤ 0 at n≥150 → PARKED (gate not proven).
+- below ~150 → still collecting, ignore the %s.
+
+Nothing else to do. Collector needs ~150 resolved windows (≈11-13h at current
+rate) for a trustworthy verdict.
