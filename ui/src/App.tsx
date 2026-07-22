@@ -662,7 +662,10 @@ function OrdersTable({ orders }: { orders: Order[] }) {
               <Td right>{fmtNum(o.size, 0)}</Td>
               <Td right>{fmtPx(o.price)}</Td>
               <Td color={ok ? 'var(--green)' : o.status === 'error' ? 'var(--red)' : 'var(--amber)'} bold>{o.status}</Td>
-              <Td right>{fmtUsd(o.filled_size)}</Td>
+              {/* FILLED $ = actual fill value (shares × price), not raw share count.
+                  filled_size is shares; showing it alone inflated every row
+                  (e.g. 9 sh @ $0.93 -> $8.37, was mislabeled $9.00). */}
+              <Td right>{fmtUsd(o.filled_size * o.price)}</Td>
             </tr>
           );
         })}
@@ -719,7 +722,8 @@ function SimPositionsTable({ positions }: { positions: SimPosition[] }) {
 function SettlementsTable({ settlements }: { settlements: Settlement[] }) {
   if (!settlements.length) return <Empty>awaiting first settlement<span className="caret">_</span></Empty>;
   return (
-    <table style={tableStyle}>
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ ...tableStyle, width: 'max-content' }}>
       <thead>
         <tr>
           <Th>TIME</Th>
@@ -729,10 +733,15 @@ function SettlementsTable({ settlements }: { settlements: Settlement[] }) {
           <Th right>COST</Th>
           <Th right>PAID</Th>
           <Th right>P&L</Th>
+          {/* % gain/loss on the deployed cost, so a win and a loss are
+              comparable at a glance instead of just absolute $. */}
+          <Th right>% G/L</Th>
         </tr>
       </thead>
       <tbody>
-        {settlements.map((s, i) => (
+        {settlements.map((s, i) => {
+          const glPct = s.cost ? (s.pnl / s.cost) * 100 : 0;
+          return (
           <tr key={i}>
             <Td dim>{fmtTime(s.resolved_ts)}</Td>
             <Td dim>…{s.market_slug.slice(-10)}</Td>
@@ -743,10 +752,15 @@ function SettlementsTable({ settlements }: { settlements: Settlement[] }) {
             <Td right bold color={s.pnl >= 0 ? 'var(--green)' : 'var(--red)'}>
               {s.pnl >= 0 ? '+' : ''}{fmtUsd(s.pnl)}
             </Td>
+            <Td right bold color={glPct >= 0 ? 'var(--green)' : 'var(--red)'}>
+              {glPct >= 0 ? '+' : ''}{glPct.toFixed(1)}%
+            </Td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
+    </div>
   );
 }
 
