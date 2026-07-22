@@ -169,3 +169,15 @@ LIVE/KANBAN/COLLECTOR nav to the classic SPA `TopBar` (it was missing — only
 the kanban/collector pages had it), so every view can switch.
 
 **Verdict.** LIVE — no research conclusion changed; documentation/UX only.
+
+### Discord deploy webhook removed; collector liveness flag added
+
+**Method.** Removed the `/api/deploy-hook` Discord relay (unnecessary — the
+deploy footer already shows sha + railway ID, and you do not want the webhook).
+The collector now writes `collector.pid` and the dashboard polls it into
+`/api/state.collector_running` (mirrors the bot's liveness pattern), so the
+collector's health is directly observable instead of inferring it from DB
+writes.
+
+**Verdict.** LIVE — collector is observable end-to-end; nothing else blocks
+letting it run ~25h to reach a verdict.

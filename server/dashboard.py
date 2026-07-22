@@ -17,7 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-import requests
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,6 +43,7 @@ _state: dict[str, Any] = {
     "positions": [],          # data-api positions for deposit wallet
     "value_usd": None,        # data-api value endpoint
     "bot_running": False,
+    "collector_running": False,
     "errors": {},             # last error per poller for debugging
 }
 
@@ -505,6 +505,26 @@ async def poll_bot_running_loop():
         await asyncio.sleep(2.0)
 
 
+async def poll_collector_running_loop():
+    """Mirror poll_bot_running_loop for the gate-collector subprocess.
+
+    The collector supervisor (run_service.run_collector) writes ROOT/collector.pid
+    with its own pid. On Railway (Linux) that is a real OS pid, so _pid_alive
+    resolves it directly. Absence of the file (or a dead pid) => not running.
+    """
+    pid_path = ROOT / "collector.pid"
+    while True:
+        running = False
+        if pid_path.exists():
+            try:
+                pid = int(pid_path.read_text().strip())
+                running = _pid_alive(pid)
+            except (OSError, ValueError):
+                running = False
+        _state["collector_running"] = running
+        await asyncio.sleep(2.0)
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 
@@ -524,6 +544,7 @@ async def _startup():
     asyncio.create_task(poll_positions_loop())
     asyncio.create_task(poll_balance_loop())
     asyncio.create_task(poll_bot_running_loop())
+    asyncio.create_task(poll_collector_running_loop())
     asyncio.create_task(analytics_loop())
     if cfg.use_spot_gate:
         SPOT.start()   # read-only Binance feed, for gate visibility in the UI
@@ -651,6 +672,7 @@ def state():
     return {
         "now": now,
         "bot_running": _state["bot_running"],
+        "collector_running": _state["collector_running"],
         "bot_mode": _state.get("bot_mode", "stopped"),
         "risk_state": _risk_state_from(pnl, snap.get("risk_streak", 0)),
         "wallet": {
@@ -791,34 +813,7 @@ def collector_state():
     return _collector_state()
 
 
-# ---------------------------------------------------------------------------
-# Deploy webhook relay. Railway project webhooks POST deploy events here; we
-# forward a short summary to Discord if DISCORD_WEBHOOK is configured. This
-# closes the verification loop: every redeploy announces itself.
-# ---------------------------------------------------------------------------
-from fastapi import Request  # noqa: E402  (imported late to keep top clean)
 
-
-@app.post("/api/deploy-hook")
-async def deploy_hook(req: Request):
-    try:
-        payload = await req.json()
-    except Exception:
-        payload = {}
-    hook = os.environ.get("DISCORD_WEBHOOK")
-    summary = (
-        f"🚀 deploy event on polymarket-taker\n"
-        f"sha={DEPLOY_META['deploy_sha']} "
-        f"railway={DEPLOY_META['railway_deploy_id']}\n"
-        f"type={payload.get('type')} status={payload.get('status')}"
-    )
-    if hook:
-        try:
-            requests.post(hook, json={"content": summary}, timeout=5)
-        except Exception as e:
-            return {"ok": False, "relayed": False, "error": str(e)}
-        return {"ok": True, "relayed": True}
-    return {"ok": True, "relayed": False, "note": "no DISCORD_WEBHOOK set"}
 
 
 # ---------------------------------------------------------------------------

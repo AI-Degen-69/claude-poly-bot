@@ -188,11 +188,23 @@ def run_collector() -> None:
     """
     env = dict(os.environ, PYTHONPATH=str(ROOT),
                COLLECTOR_DB=os.environ.get("COLLECTOR_DB", "/data/collector.db"))
+    pid_path = ROOT / "collector.pid"
     while True:
+        # Record our own pid so the dashboard can show collector liveness
+        # (mirrors the bot's bot.pid / bot.win.pid pattern).
+        try:
+            pid_path.write_text(str(os.getpid()))
+        except OSError:
+            pass
         print("[collector] starting (read-only gate collector)", flush=True)
         proc = subprocess.Popen([sys.executable, "-m", "strategy.collect_gate"],
                                 cwd=str(ROOT), env=env)
         code = proc.wait()
+        try:
+            if pid_path.exists():
+                pid_path.unlink()
+        except OSError:
+            pass
         print(f"[collector] exited code={code}; restarting in {RESTART_BACKOFF}s",
               flush=True)
         time.sleep(RESTART_BACKOFF)
