@@ -708,7 +708,7 @@ function SimPositionsTable({ positions }: { positions: SimPosition[] }) {
             <Td right>{fmtUsd(p.cost)}</Td>
             <Td right bold={!p.pending} color={p.pending ? 'var(--amber)' : (p.unrealized >= 0 ? 'var(--green)' : 'var(--red)')}>
               {p.pending
-                ? 'AWAITING RESOLUTION'
+                ? 'PENDING'
                 : `${p.unrealized >= 0 ? '+' : ''}${fmtUsd(p.unrealized)}`}
             </Td>
           </tr>
@@ -722,8 +722,7 @@ function SimPositionsTable({ positions }: { positions: SimPosition[] }) {
 function SettlementsTable({ settlements }: { settlements: Settlement[] }) {
   if (!settlements.length) return <Empty>awaiting first settlement<span className="caret">_</span></Empty>;
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ ...tableStyle, width: 'max-content' }}>
+    <table style={tableStyle}>
       <thead>
         <tr>
           <Th>TIME</Th>
@@ -760,7 +759,6 @@ function SettlementsTable({ settlements }: { settlements: Settlement[] }) {
         })}
       </tbody>
     </table>
-    </div>
   );
 }
 
@@ -816,7 +814,7 @@ const bottomBarStyle: CSSProperties = {
 };
 const gridStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '300px 1fr 420px',
+  gridTemplateColumns: '300px 1fr 660px',
   gap: 6, padding: 6, height: '100%', overflow: 'hidden',
 };
 const colStack: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0 };
