@@ -27,3 +27,9 @@ bottom. One bullet per concrete thing done, tried, found, or broken.
 * Split the repo: taker and maker now live in separate repos under `AI Trading/`, with identical structure (`strategy/`, `server/`, `research/`, `deploy/`).
 * **Live result at 74 settled markets:** win rate 91.9% [83.4–96.2] vs 94.2% breakeven, net −$345.75. Only the 0.80–0.90 band has positive edge. Live gate audit shows ≥10bps 93.3% (n=15) vs <10bps 91.5% (n=59) — much weaker separation than the backtest. **Inconclusive, ~126 more markets needed.**
 * Removed `maker/` from this repo — the maker now runs from its own repo and its own Railway service, verified live before deletion so a working copy always existed.
+
+## 22/07/2026
+
+* At **110 settled markets** the taker has crossed above its breakeven line for the first time: win rate **94.5%** [88.6–97.5] against 94.3% needed, net **+$62.85**, profit factor 1.06. CI still straddles the bar, so this is a hint with the right sign, not a result. ~90 more markets to a 90% call.
+* Edge by entry price is now positive in three of four bands — 0.80–0.90 **+2.4**, 0.90–0.95 +0.4, 0.95–0.98 +0.9 — and negative only in 0.98–1.01 (**−0.3**), which is what the fee curve predicts.
+* **The spot gate shows no live separation:** ≥10bps wins 94.4% (n=18) versus <10bps at 94.6% (n=92). The backtest measured 96.0% vs 81.3% at ≥5bps over 584 windows and that gap has not reproduced. Either the backtest overfit or the effect is far smaller than it looked. **Verdict: OPEN** — this is now the main open question for the taker, since the gate is the entire thesis.

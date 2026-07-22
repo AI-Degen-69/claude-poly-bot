@@ -39,8 +39,46 @@ bash scripts/setup-hooks.sh        # required once: research-log enforcement
 .venv/bin/uvicorn server.dashboard:app --port 8787
 ```
 
-## Current state
+## Current state — 110 settled markets
 
-See [research/RESEARCH_SUMMARY.md](research/RESEARCH_SUMMARY.md). At 74 settled
-markets the strategy is **inconclusive and currently negative**: win rate 91.9%
-[83.4–96.2] against a 94.2% breakeven.
+Updated 2026-07-22. Live figures on the dashboard; this is a snapshot.
+
+| metric | value |
+|---|---|
+| settled markets | 110 (104W / 6L) |
+| win rate | **94.5%** [88.6–97.5] |
+| breakeven required | 94.3% |
+| net P&L | **+$62.85** (equity $5,062.85 from $5,000) |
+| expectancy | +$0.57 per market |
+| profit factor | 1.06 |
+| fees paid | $87.73 |
+| max drawdown | −$708.92 |
+| **verdict** | **INCONCLUSIVE** — ~90 more markets needed |
+
+The strategy is now marginally **above** its breakeven line, having been below
+it for most of the run. The confidence interval [88.6–97.5] still straddles the
+94.3% bar, so this is not yet a result — it is a hint with the right sign.
+
+### Edge by entry price
+
+| band | n | win | needed | edge |
+|---|---|---|---|---|
+| 0.80–0.90 | 316 | 88.6% | 86.2% | **+2.4** |
+| 0.90–0.95 | 576 | 93.4% | 93.0% | +0.4 |
+| 0.95–0.98 | 589 | 97.3% | 96.3% | +0.9 |
+| 0.98–1.01 | 431 | 98.4% | 98.7% | **−0.3** |
+
+The cheapest band carries most of the edge; the most expensive band is
+negative, which is what the fee curve predicts.
+
+### The spot gate is not currently earning its place
+
+| filter | win rate | n |
+|---|---|---|
+| ≥10 bps | 94.4% | 18 |
+| <10 bps | 94.6% | 92 |
+
+Live data shows **no separation** — the backtest measured 96.0% vs 81.3% at
+≥5bps, and that gap has not reproduced. Either the backtest overfit 584 windows
+or the effect is smaller than it looked. This is the main open question for the
+taker and is tracked in [research/RESEARCH_LOG.md](research/RESEARCH_LOG.md).
