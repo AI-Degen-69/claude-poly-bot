@@ -181,3 +181,15 @@ writes.
 
 **Verdict.** LIVE — collector is observable end-to-end; nothing else blocks
 letting it run ~25h to reach a verdict.
+
+### Collector info panel rewritten in plain language (two-flame heat model)
+
+**Method.** Rewrote the `/collector` explainer + KPI tiles for readability: a
+glossary (book favourite / CLOB / bps / gate / 81→96), per-tile meaning, a
+**two-flame** verdict strip (🔥 BOOK HEAT at book_acc ≥81%, 🔥 GATE HEAT at
+gate_acc ≥94% = gate validated; both = KEEP, else PARKED), and corrected the
+"bars at the top" wording to "tiles" (the page renders tiles, not chart bars).
+Green now means *meets the benchmark* (book ≥81%, gate ≥94%, gap >0), not 100%.
+
+**Verdict.** LIVE — documentation/UX only; thresholds are explicit and match
+the backtest claim (81→96) and the taker fee breakeven (~94%).

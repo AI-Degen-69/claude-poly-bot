@@ -20,66 +20,66 @@ import os
 
 _EXPLAINER = r"""
 <div class="explain">
-  <div class="ex-head">WHAT IS THIS PAGE · GATE_COLLECTOR</div>
+  <div class="ex-head">📌 GATE_COLLECTOR — THE ONE QUESTION</div>
+  <div class="ex-lead">Does the <b>Binance gate</b> actually make the bot smarter? The backtest
+  claimed: just betting the <b>book-favourite</b> side wins <b>81%</b>; adding the Binance gate
+  wins <b>96%</b>. We are collecting <b>live</b> data to confirm that or kill it. Nothing else
+  to do but let it run.</div>
+
   <div class="ex-grid">
     <div class="ex-card">
-      <div class="ex-h">🎯 OBJECTIVE</div>
-      <div class="ex-b">Settle the open question from the gate retest: does the
-      <b>book-favoured-side + Binance spot-gate</b> combo actually predict the
-      winner ~96% of the time <b>forward</b>, on live data? The backtest claimed
-      81&rarr;96 but could only measure the spot signal (77&rarr;93); the CLOB
-      book is live-only and was never tested. This page collects it window by
-      window until the sample is big enough to call.</div>
-    </div>
-    <div class="ex-card">
-      <div class="ex-h">👁 WHAT WE WATCH</div>
-      <div class="ex-b">Every 5-min BTC window: at <b>t-120s</b> (the moment the
-      bot may enter) we snapshot the <b>CLOB order book</b> for both sides
-      (UP/DOWN bid+ask) and the <b>Binance spot move</b> vs the window open
-      (spot_bps). We then record the <b>real winner</b> once Polymarket resolves.</div>
-    </div>
-    <div class="ex-card">
-      <div class="ex-h">🔬 WHAT WE INVESTIGATE</div>
-      <div class="ex-b">Two signals, measured against the real outcome:<br>
-      &bull; <b>hit_book</b> — did the book-favoured side win? (ungated, ~81% in backtest)<br>
-      &bull; <b>hit_gate</b> — did BOTH the book AND a &ge;5bps Binance move agree, and win? (gated, ~96% in backtest)</div>
-    </div>
-    <div class="ex-card">
-      <div class="ex-h">📊 RESULTS WE EXPECT</div>
-      <div class="ex-b">The two bars at the top tell the story:<br>
-      &bull; <b>BOOK ACC (ungated)</b> should sit near <b>~81%</b>.<br>
-      &bull; <b>GATE ACC (gated)</b> should sit near <b>~96%</b>.<br>
-      &bull; <b>GATE COVERAGE</b> = % of windows the &ge;5bps gate actually fires on (~25-40%).</div>
-    </div>
-    <div class="ex-card">
-      <div class="ex-h">⚖️ HOW A VERDICT LOOKS</div>
-      <div class="ex-b"><b>LIVE / KEEP GATE:</b> GATE ACC &ge; ~94% (clears the taker fee breakeven)
-      with a CI that excludes 90%.<br>
-      <b>PARKED / DROP GATE:</b> GATE ACC &le; breakeven, or no lift over BOOK ACC.<br>
-      <b>INCONCLUSIVE:</b> not enough resolved windows yet (need ~150-300).</div>
-    </div>
-    <div class="ex-card">
-      <div class="ex-h">🧭 POSSIBLE SCENARIOS</div>
+      <div class="ex-h">📖 WORDS YOU'LL SEE</div>
       <div class="ex-b">
-      &bull; <b>Reproduces backtest:</b> BOOK ~81%, GATE ~96% &rarr; gate is real, keep it.<br>
-      &bull; <b>Book strong, gate flat:</b> BOOK ~90%+, GATE no better &rarr; gate adds nothing; drop it.<br>
-      &bull; <b>Both weak:</b> BOOK &lt; fee breakeven &rarr; the whole signal is noise; strategy rethink.<br>
-      &bull; <b>Coverage too low:</b> gate fires &lt;15% of windows &rarr; rarely usable even if accurate.</div>
+      &bull; <b>BOOK FAVOURITE</b> = which side (UP/DOWN) has the higher bid on Polymarket
+      right now. "Book" = <b>CLOB</b> = the live order book / exchange. Higher bid = more
+      people betting that side.<br>
+      &bull; <b>BPS</b> = basis point = <b>0.01%</b>. 5 bps = 0.05%. It measures how much BTC moved
+      on Binance since the window opened. |spot| &ge; 5 bps = a <b>real move</b>, not noise.<br>
+      &bull; <b>GATE</b> = the rule: only count a window when Binance moved &ge;5 bps in the
+      <b>same direction</b> as the book favourite.<br>
+      &bull; <b>81&rarr;96</b> = backtest: book-favourite alone = 81% wins (<i>ungated</i>);
+      book + gate = 96% (<i>gated</i>). The gate filters out weak/ambiguous moments.</div>
     </div>
     <div class="ex-card">
-      <div class="ex-h">🔎 INDICATORS TO WATCH</div>
+      <div class="ex-h">🔢 THE TILES (top row) — what each number means</div>
       <div class="ex-b">
-      &bull; <b>WINDOWS RESOLVED</b> climbing past ~150 (sample becoming real).<br>
-      &bull; <b>OPEN</b> lane draining as windows resolve.<br>
-      &bull; <b>SETTLE</b> cards: green border = hit_gate &check;, red = miss &cross;.<br>
-      &bull; A stable gap <b>GATE ACC &minus; BOOK ACC</b> of ~10-15 pts = the gate is earning its place.</div>
+      &bull; <b>BOOK ACC (ungated)</b> = % of resolved windows where the book-favourite side
+      <b>WON</b>. <span class="g">Green = &ge;81%</span> (matches backtest). Below that = the naive
+      signal is weaker than claimed.<br>
+      &bull; <b>GATE ACC (gated)</b> = % of gate-fired windows where we'd have <b>WON</b>.
+      <span class="g">Green = &ge;94%</span> (above the taker <b>FEE breakeven</b>). This is the
+      number that matters.<br>
+      &bull; <b>GATE GAP</b> = GATE ACC &minus; BOOK ACC. <span class="g">Green &amp; big = the gate
+      earns its place.</span> <span class="r">Red / zero = the gate adds nothing.</span> Dream =
+      as positive as possible.<br>
+      &bull; <b>GATE COVERAGE</b> = % of windows where the gate even <b>fired</b> (|spot|&ge;5bps).
+      <span class="d">White = just info, not a score.</span> Too low (&lt;15%) = gate rarely lets
+      you trade.<br>
+      &bull; <b>WINDOWS RESOLVED</b> = sample size. Need <b>~150</b> (min) to <b>~300</b> (solid)
+      before trusting any %.</div>
     </div>
     <div class="ex-card">
-      <div class="ex-h">⏳ WHAT IT TAKES TO GET A VERDICT</div>
+      <div class="ex-h">🔥 WHAT WE WANT — THE TWO FLAMES</div>
+      <div class="ex-b">We want <b>BOOK HEAT</b> and <b>GATE HEAT</b> BOTH 🔥 green:
+      <br>&bull; <b>BOOK HEAT 🔥</b> = book acc is real (&ge;81%)<br>
+      &bull; <b>GATE HEAT 🔥</b> = gate acc clears the fee line (&ge;94%) &rarr; the gate is
+      <b>VALIDATED</b><br>
+      Two flames = <b>KEEP THE GATE</b> (verdict LIVE). One or none = <b>PARKED</b> (gate not
+      proven; don't rely on it). We reach it by letting it run ~25h to ~150-300 windows.</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">🧭 SCENARIOS</div>
+      <div class="ex-b">
+      &bull; BOOK ~81% + GATE ~96% &rarr; gate is real, <b>KEEP IT</b>.<br>
+      &bull; BOOK ~90%+ but GATE no better &rarr; gate adds nothing, <b>DROP IT</b>.<br>
+      &bull; Both weak (&lt; breakeven) &rarr; whole signal is noise, rethink.<br>
+      &bull; Coverage &lt;15% &rarr; gate fires too rarely to matter.</div>
+    </div>
+    <div class="ex-card">
+      <div class="ex-h">⏳ WHAT IT TAKES</div>
       <div class="ex-b">~300 windows &asymp; <b>25 hours</b> of live collection. The collector runs
-      24/7 in the same container, writing only to <code>COLLECTOR_DB</code> (never the
-      bot's trades.db). No action needed from you — just let it run and watch the
-      bars converge.</div>
+      24/7 in the same container, writing only to <code>COLLECTOR_DB</code> (never the bot's
+      trades.db). No action from you — just watch the flames turn green.</div>
     </div>
   </div>
 </div>
@@ -107,6 +107,13 @@ _PAGE_HEAD = r"""
  .k{border:1px solid var(--bd);background:var(--pan);padding:6px 9px}
  .k .n{color:var(--dim);font-size:10.5px;letter-spacing:.8px}
  .k .v{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+ .verdict{display:flex;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--bd);
+          background:#0d1011;flex-wrap:wrap}
+ .pill{border:1px solid var(--bd);border-radius:14px;padding:3px 12px;font-size:12px;font-weight:700;
+       display:inline-flex;gap:6px;align-items:center}
+ .pill.hot{color:var(--gn);border-color:var(--gn);background:#0f1c14}
+ .pill.cold{color:var(--dim);border-color:var(--bd);background:transparent}
+ .pill small{font-weight:400;color:var(--dim)}
  .kan{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:10px 12px;align-items:start}
  @media(max-width:1250px){.kan{grid-template-columns:repeat(2,1fr)}}
  .lane{border:1px solid var(--bd);background:var(--pan);display:flex;flex-direction:column;min-height:150px}
@@ -126,13 +133,10 @@ _PAGE_HEAD = r"""
  .up{border-left-color:var(--gn)} .dn{border-left-color:var(--rd)}
  .win{border-left-color:var(--gn)} .loss{border-left-color:var(--rd)}
  .g{color:var(--gn)}.r{color:var(--rd)}.a{color:var(--am)}.d{color:var(--dim)}
- table{width:100%;border-collapse:collapse;font-size:11.5px;margin-top:8px}
- th{color:var(--dim);text-align:right;font-weight:400;padding:3px 4px;border-bottom:1px solid var(--bd)}
- th:first-child,td:first-child{text-align:left}
- td{padding:3px 4px;text-align:right;font-variant-numeric:tabular-nums}
  .explain{border-bottom:1px solid var(--bd);padding:10px 12px;background:#0d1011}
- .ex-head{color:var(--am);font-weight:700;letter-spacing:1.2px;font-size:12px;margin-bottom:8px}
- .ex-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px}
+ .ex-head{color:var(--am);font-weight:700;letter-spacing:1.2px;font-size:12px;margin-bottom:6px}
+ .ex-lead{color:var(--tx);font-size:12.5px;line-height:1.6;margin-bottom:8px}
+ .ex-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:8px}
  .ex-card{border:1px solid var(--bd);background:var(--pan);padding:8px 10px;border-radius:5px}
  .ex-h{color:var(--am);font-weight:700;font-size:11.5px;margin-bottom:4px;letter-spacing:.5px}
  .ex-b{color:var(--tx);font-size:12px;line-height:1.6}
@@ -152,6 +156,7 @@ _PAGE_HEAD = r"""
 </div>
 """ + _EXPLAINER + r"""
 <div class="kpis" id="kpis"></div>
+<div class="verdict" id="verdict"></div>
 <div class="kan" id="kan"></div>
 """
 
@@ -159,29 +164,46 @@ _PAGE_TAIL = r"""
 <div class="foot" id="foot"></div>
 <script>
 const $=x=>document.getElementById(x);
-const usd=v=>v==null?'-':'$'+Number(v).toFixed(2);
 const pct=v=>v==null?'-':v.toFixed(1)+'%';
-const cls=v=>v==null?'':(v>=0?'g':'r');
-const hhmm=t=>t?new Date(t*1000).toLocaleTimeString():'-';
+// Meaningful thresholds (green = meets the bar, NOT 100%).
+// book good at >=81 (backtest), gate good at >=94 (fee breakeven).
+const bookCls=v=>v==null?'':(v>=81?'g':(v>=70?'a':'r'));
+const gateCls=v=>v==null?'':(v>=94?'g':(v>=90?'a':'r'));
+const gapCls=v=>v==null?'':(v>0?'g':'r');
 
 async function tick(){
   let s; try{ s=await (await fetch('/api/collector-state',{cache:'no-store'})).json(); }
   catch(e){ return; }
   $('clock').textContent=new Date().toLocaleTimeString();
   const st=s.stats||{}, w=s.windows||[];
-  const K=(n,v,sub,c)=>`<div class="k"><div class="n">${n}</div>
+  const n=st.n||0;
+  const K=(name,v,sub,c)=>`<div class="k"><div class="n">${name}</div>
       <div class="v ${c||''}">${v}</div><div class="s">${sub||''}</div></div>`;
   const gap = (st.book_acc!=null && st.gate_acc!=null)
       ? (st.gate_acc - st.book_acc).toFixed(1)+' pts' : '—';
   $('kpis').innerHTML =
-      K('WINDOWS RESOLVED', st.n||0, 'in sample', '')
-    + K('BOOK ACC (ungated)', pct(st.book_acc), 'favoured side hit', cls((st.book_acc||0)-50))
-    + K('GATE ACC (gated)', pct(st.gate_acc), '|spot|>=5bps hit', cls((st.gate_acc||0)-90))
-    + K('GATE GAP', gap, 'gate - book', cls((st.gate_acc||0)-(st.book_acc||0)))
-    + K('GATE COVERAGE', pct(st.gate_coverage), '% windows gate-eligible', '')
+      K('WINDOWS RESOLVED', n, (n>=150?'sample OK':(n>=30?'building':'collecting')), n>=150?'g':(n>=30?'a':''))
+    + K('BOOK ACC (ungated)', pct(st.book_acc), 'book side won', bookCls(st.book_acc))
+    + K('GATE ACC (gated)', pct(st.gate_acc), 'gate side won', gateCls(st.gate_acc))
+    + K('GATE GAP', gap, 'gate - book', gapCls((st.gate_acc||0)-(st.book_acc||0)))
+    + K('GATE COVERAGE', pct(st.gate_coverage), '% gate fired', '')   // white = info only
     + K('HIT BOOK', st.hit_book||0, 'raw wins', 'g')
     + K('HIT GATE', st.hit_gate||0, 'gated wins', 'g')
-    + K('OPEN', st.open||0, 'awaiting resolution', 'a');
+    + K('OPEN', st.open||0, 'awaiting resolve', 'a');
+
+  // Two-flames verdict strip.
+  const enough = n>=30;
+  const bookHot = enough && st.book_acc!=null && st.book_acc>=81;
+  const gateHot = enough && st.gate_acc!=null && st.gate_acc>=94;
+  const gapV = (st.gate_acc||0)-(st.book_acc||0);
+  const pill=(hot,label,sub)=>`<span class="pill ${hot?'hot':'cold'}">${hot?'🔥':'❄️'} ${label}
+      ${sub?`<small>${sub}</small>`:''}</span>`;
+  $('verdict').innerHTML =
+      (enough? '' : `<span class="d" style="font-size:11px">collecting… need ~30 windows before heat is meaningful (${n} now)</span>`)
+    + pill(bookHot, 'BOOK HEAT', enough?`${pct(st.book_acc)}`:'')
+    + pill(gateHot, 'GATE HEAT', enough?`${pct(st.gate_acc)}`:'')
+    + `<span class="pill ${gapV>0?'hot':'cold'}">${gapV>0?'🔥':'❄️'} GATE GAP
+       <small>${gapV>0?'+':''}${gapV.toFixed(1)} pts</small></span>`;
 
   // Flow lanes by status.
   const lane=(id,title,c,cards)=>`<div class="lane ${c}"><h3><span>${title}</span>
