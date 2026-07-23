@@ -9,6 +9,7 @@ Run:  .venv/bin/uvicorn server.dashboard:app --host 127.0.0.1 --port 8787
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import sqlite3
 import sys
@@ -753,6 +754,17 @@ def meta():
 COLLECTOR_DB_PATH = os.environ.get("COLLECTOR_DB", "/data/collector.db")
 
 
+def _wilson(acc: float | None, n: int) -> tuple[float | None, float | None]:
+    """Wilson score 95% CI (lo, hi) as fractions. None if undefined."""
+    if acc is None or n == 0:
+        return (None, None)
+    z = 1.96
+    denom = 1.0 + z * z / n
+    center = (acc + z * z / (2 * n)) / denom
+    half = z * math.sqrt(acc * (1 - acc) / n + z * z / (4 * n * n)) / denom
+    return (center - half, center + half)
+
+
 def _collector_state() -> dict:
     import sqlite3 as _sql
     from pathlib import Path as _P
@@ -764,7 +776,8 @@ def _collector_state() -> dict:
             "present": False,
             "windows": [],
             "stats": {"n": 0, "resolved": 0, "hit_book": 0, "hit_gate": 0,
-                      "gate_coverage": 0.0, "book_acc": None, "gate_acc": None},
+                      "gate_coverage": 0.0, "book_acc": None, "gate_acc": None,
+                      "book_ci": [None, None], "gate_ci": [None, None]},
         }
     try:
         con = _sql.connect(str(p), timeout=2.0)
@@ -773,6 +786,19 @@ def _collector_state() -> dict:
             "spot_favored, winner, resolved_ts, status, hit_book, hit_gate "
             "FROM collector_windows ORDER BY snap_ts DESC LIMIT 200"
         ).fetchall()
+        # Stats are computed over the FULL sample, not the 200-row payload tail
+        # (the collector is meant to exceed 200 windows; a tail-limited stat
+        # would silently misreport the verdict numbers).
+        agg = con.execute(
+            "SELECT COUNT(*) AS n,"
+            "       SUM(CASE WHEN status='RESOLVED' THEN 1 ELSE 0 END) AS resolved,"
+            "       SUM(CASE WHEN status='RESOLVED' AND hit_book=1 THEN 1 ELSE 0 END) AS hb,"
+            "       SUM(CASE WHEN status='RESOLVED' AND spot_bps IS NOT NULL"
+            "               AND ABS(spot_bps)>=5.0 THEN 1 ELSE 0 END) AS gn,"
+            "       SUM(CASE WHEN status='RESOLVED' AND spot_bps IS NOT NULL"
+            "               AND ABS(spot_bps)>=5.0 AND hit_gate=1 THEN 1 ELSE 0 END) AS hg"
+            "  FROM collector_windows"
+        ).fetchone()
         con.close()
     except Exception as e:
         return {"db": str(p), "present": True, "error": str(e),
@@ -787,18 +813,19 @@ def _collector_state() -> dict:
         }
         for r in rows
     ]
-    resolved = [w for w in windows if w["status"] == "RESOLVED"]
-    n = len(resolved)
-    hit_book = sum(1 for w in resolved if w["hit_book"])
+    n = int(agg[1] or 0)
+    hit_book = int(agg[2] or 0)
+    gate_n = int(agg[3] or 0)
+    hit_gate = int(agg[4] or 0)
     # gated = windows where the gate actually FIRED (|spot_bps| >= 5). The
     # "gated accuracy" is the win rate among those windows only -- it is the
     # direct forward analogue of the backtest's 81->96 gate number, and it is
     # what GATE HEAT >=94% tests. Dividing by n (all windows) is wrong: it is
     # capped at gate_coverage (~33%) and can never light the flame.
-    gated = [w for w in resolved
-             if w["spot_bps"] is not None and abs(w["spot_bps"]) >= 5.0]
-    gate_n = len(gated)
-    hit_gate = sum(1 for w in gated if w["hit_gate"])
+    book_acc = hit_book / n if n else None
+    gate_acc = hit_gate / gate_n if gate_n else None
+    book_ci = _wilson(book_acc, n)
+    gate_ci = _wilson(gate_acc, gate_n)
     return {
         "db": str(p), "present": True,
         "windows": windows,
@@ -809,8 +836,12 @@ def _collector_state() -> dict:
             "hit_gate": hit_gate,
             "gate_n": gate_n,
             "gate_coverage": round(100.0 * gate_n / n, 1) if n else 0.0,
-            "book_acc": round(100.0 * hit_book / n, 1) if n else None,
-            "gate_acc": round(100.0 * hit_gate / gate_n, 1) if gate_n else None,
+            "book_acc": round(100.0 * book_acc, 1) if book_acc is not None else None,
+            "gate_acc": round(100.0 * gate_acc, 1) if gate_acc is not None else None,
+            "book_ci": [round(100.0 * lo, 1) if lo is not None else None
+                        for lo in book_ci],
+            "gate_ci": [round(100.0 * lo, 1) if lo is not None else None
+                        for lo in gate_ci],
         },
     }
 

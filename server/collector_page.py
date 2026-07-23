@@ -177,14 +177,19 @@ async function tick(){
   $('clock').textContent=new Date().toLocaleTimeString();
   const st=s.stats||{}, w=s.windows||[];
   const n=st.n||0;
+  // CI formatting: show [lo–hi] only once there is a real base.
+  const ciTxt=(acc, ci)=>{
+    if(acc==null || !ci || ci[0]==null || ci[1]==null) return '';
+    return ` [${ci[0].toFixed(1)}–${ci[1].toFixed(1)}]`;
+  };
   const K=(name,v,sub,c)=>`<div class="k"><div class="n">${name}</div>
       <div class="v ${c||''}">${v}</div><div class="s">${sub||''}</div></div>`;
   const gap = (st.book_acc!=null && st.gate_acc!=null)
       ? (st.gate_acc - st.book_acc).toFixed(1)+' pts' : '—';
   $('kpis').innerHTML =
       K('WINDOWS RESOLVED', n, (n>=150?'sample OK':(n>=30?'building':'collecting')), n>=150?'g':(n>=30?'a':''))
-    + K('BOOK ACC (ungated)', pct(st.book_acc), 'book side won', bookCls(st.book_acc))
-    + K('GATE ACC (gated)', pct(st.gate_acc), 'gate side won', gateCls(st.gate_acc))
+    + K('BOOK ACC (ungated)', pct(st.book_acc), 'book side won'+ciTxt(st.book_acc, st.book_ci), bookCls(st.book_acc))
+    + K('GATE ACC (gated)', pct(st.gate_acc), 'gate side won'+ciTxt(st.gate_acc, st.gate_ci), gateCls(st.gate_acc))
     + K('GATE GAP', gap, 'gate - book', gapCls((st.gate_acc||0)-(st.book_acc||0)))
     + K('GATE COVERAGE', pct(st.gate_coverage), '% gate fired', '')   // white = info only
     + K('HIT BOOK', st.hit_book||0, 'raw wins', 'g')
@@ -205,8 +210,8 @@ async function tick(){
   $('verdict').innerHTML =
       (!bookEnough? `<span class="d" style="font-size:11px">collecting… need ~30 windows before heat is meaningful (${n} now)</span>`
        : (!gateEnough? `<span class="d" style="font-size:11px">gate still warming… need ~20 gated windows (${(st.gate_n||0)} now)</span>` : ''))
-    + pill(bookHot, 'BOOK HEAT', bookEnough?`${pct(st.book_acc)}`:'')
-    + pill(gateHot, 'GATE HEAT', gateEnough?`${pct(st.gate_acc)} · n=${(st.gate_n||0)}`:'')
+    + pill(bookHot, 'BOOK HEAT', bookEnough?`${pct(st.book_acc)}${ciTxt(st.book_acc, st.book_ci)}`:'')
+    + pill(gateHot, 'GATE HEAT', gateEnough?`${pct(st.gate_acc)}${ciTxt(st.gate_acc, st.gate_ci)} · n=${(st.gate_n||0)}`:'')
     + `<span class="pill ${gapV>0?'hot':'cold'}">${gapV>0?'🔥':'❄️'} GATE GAP
        <small>${gapV>0?'+':''}${gapV.toFixed(1)} pts</small></span>`;
 

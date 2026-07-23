@@ -264,3 +264,26 @@ that the `/data` volume (91 MB) keeps `collector.db` across redeploys.
   Redeployed volume-preserving (Railway auto-deploys on push; `/data` volume
   keeps the 91-window sample). Verified live after deploy: `/api/collector-state`
   returns the corrected `gate_acc` (86.7%) and `gate_n` (30).
+
+### Make the collector verdict show its uncertainty, and fix the 200-window stats cap
+
+**Method.** Follow-up to the gate-accuracy fix (above). Added a Wilson 95% CI
+helper to `server/dashboard.py` and returned `book_ci` / `gate_ci` (as
+percentages) in the `stats` block; `server/collector_page.py` now renders
+`[lo–hi]` under the BOOK/GATE KPI tiles and inside the verdict flames, so the
+uncertainty is visible before a flame can honestly fire. While reading the stats
+code, found a second latent flaw: `stats` were derived from the same
+`ORDER BY snap_ts DESC LIMIT 200` rows that feed the lane payload, so once the
+collector passes 200 windows (it is built for ~300) every verdict number would
+silently track a 200-row *tail* rather than the full sample. Replaced that with
+a separate full-table aggregate `SELECT … FROM collector_windows` that feeds
+`n`, `gate_n`, `hit_book`, `hit_gate`.
+
+**Result.** CIs now surface live (e.g. at n=94: book 71.3% [61.5–79.5], gated
+87.5% [71.9–95.0] n=32). Unit-tested the full-aggregate path on a 250-row
+fixture: `stats` returns `n=250` (the whole table), not the ~200 a tail-limited
+query would yield — so the verdict will stay honest past 200 windows.
+
+**Verdict.** LIVE — UX/integrity only; no research conclusion changed. The CI
+display makes the wide [70–95] gated band explicit, which is exactly why neither
+flame should light yet at the current sample size.
