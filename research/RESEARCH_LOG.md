@@ -287,3 +287,66 @@ query would yield — so the verdict will stay honest past 200 windows.
 **Verdict.** LIVE — UX/integrity only; no research conclusion changed. The CI
 display makes the wide [70–95] gated band explicit, which is exactly why neither
 flame should light yet at the current sample size.
+
+## Session 5 — 2026-07-23 (forward verdict at n=313 + open-count display bug)
+
+### The forward collector has now cleared the 150-window verdict threshold — what does the book-favoured-side + spot-gate combo actually deliver?
+
+**Method.** Pulled `/api/collector-state` live from Railway
+(`claude-poly-bot-production.up.railway.app`). Recomputed every verdict metric
+*by hand* from the raw aggregates (`n`, `hit_book`, `gate_n`, `hit_gate`) rather
+than trusting the rendered %, and cross-checked the dashboard's arithmetic
+against an independent Wilson-95% computation. The collector has been running
+24/7 since Session 3; `bot_running` + `collector_running` both True, `/data`
+volume keeps `collector.db` across redeploys. This is the decisive sample the
+Session-3 design called for (~300 windows).
+
+**Result — decisive, and it kills the thesis:**
+
+| metric | value | 95% Wilson CI | bar it must clear |
+|---|---|---|---|
+| windows resolved (`n`) | **313** | — | ≥150 needed ✔ (3.4× the 584-window backtest) |
+| book-favoured-side acc (ungated) | **78.0%** | [73.0–82.2] | 81% (backtest book baseline) ❌ |
+| gated acc (`\|spot_bps\|≥5` AND spot_fav==winner) | **88.3%** | [81.4–92.9] | 94% (taker fee breakeven) ❌ |
+| gate coverage | 38.3% (120/313) | — | — |
+| GATE GAP (gate − book) | **+10.3 pts** | — | >0 to earn its place (✓ sign, ✗ magnitude) |
+
+The forward combo lands at **78 / 88**, not the backtest's claimed **81 / 96**.
+Both flames are cold: BOOK HEAT needs ≥81% (78.0 misses, CI tops out at 82.2),
+GATE HEAT needs ≥94% (88.3 misses by a wide margin, CI [81–93] never reaches
+94). This is the *third* independent estimate of the same signal and they now
+cluster tightly: backtest 81→96, Session-2 fresh retest 77→93, forward 78→88.
+The lift is real (+10 pts) but the gated subset sits ~6 pts below the fee
+breakeven the taker must clear to be profitable. The original 81→96 number was
+the *book-favoured-side + gate combo* collected forward — it does not
+reproduce at the sample size that matters.
+
+**Verdict.** PARKED → **DEAD (as a standalone win-rate improver).** The gate
+is not load-bearing: it consumes 38% coverage and still leaves the taker below
+breakeven. Do not gate the live strategy on this signal. The taker's *only*
+profitable band ever found was 0.80–0.90 entry price (Session 1/2) — that, not
+the spot gate, is where any edge lives. Close the collector (it has answered
+its question) unless we want to keep it as a negative-result archive.
+
+### Instrumentation bug: `open` count rendered negative (`open: -113`)
+
+**Method.** The live `stats.open` came back as **-113** — an impossible value
+for a count. Traced it to `server/dashboard.py:_collector_state`: `open` was
+computed as `len(windows) - n`, but `windows` is the **200-row payload tail**
+(`ORDER BY snap_ts DESC LIMIT 200`) while `n` is the **full-sample** resolved
+count (313). Once resolved rows exceed 200, `len(windows)` is capped at 200 and
+`open` goes negative. The page renders this raw in `collector_page.py:197`
+(`K('OPEN', st.open||0, ...)`) — so the dashboard was showing a negative
+"awaiting resolve" count live.
+
+**Result.** Fixed: the aggregate query now also returns `COUNT(*) AS total`
+(all rows, resolved+open), and `open = total - n`. Verified with a synthetic
+250-row DB (240 resolved + 10 open, snap_ts-ordered so the LIMIT-200 payload is
+all-resolved — the exact trigger): the old formula gave `-40`, the new gives
+`10` (correct). The accuracy/CI math was confirmed correct and unchanged
+(book 78.0, gate 88.3 match the hand recompute), so this is a display-only fix;
+it does not move the verdict.
+
+**Verdict.** DEAD (fixed) — display bug only; same class as the Session-4
+`gate_acc` and 200-row-cap bugs, and exactly why we recompute verdict metrics
+independently instead of trusting the rendered number.

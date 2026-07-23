@@ -790,7 +790,7 @@ def _collector_state() -> dict:
         # (the collector is meant to exceed 200 windows; a tail-limited stat
         # would silently misreport the verdict numbers).
         agg = con.execute(
-            "SELECT COUNT(*) AS n,"
+            "SELECT COUNT(*) AS total,"
             "       SUM(CASE WHEN status='RESOLVED' THEN 1 ELSE 0 END) AS resolved,"
             "       SUM(CASE WHEN status='RESOLVED' AND hit_book=1 THEN 1 ELSE 0 END) AS hb,"
             "       SUM(CASE WHEN status='RESOLVED' AND spot_bps IS NOT NULL"
@@ -813,6 +813,7 @@ def _collector_state() -> dict:
         }
         for r in rows
     ]
+    total = int(agg[0] or 0)
     n = int(agg[1] or 0)
     hit_book = int(agg[2] or 0)
     gate_n = int(agg[3] or 0)
@@ -831,7 +832,7 @@ def _collector_state() -> dict:
         "windows": windows,
         "stats": {
             "n": n,
-            "open": len(windows) - n,
+            "open": total - n,
             "hit_book": hit_book,
             "hit_gate": hit_gate,
             "gate_n": gate_n,
