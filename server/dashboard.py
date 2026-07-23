@@ -773,7 +773,7 @@ def _wilson(acc: float | None, n: int) -> tuple[float | None, float | None]:
     return (center - half, center + half)
 
 
-def _collector_state() -> dict:
+def _collector_state(full: bool = False) -> dict:
     import sqlite3 as _sql
     from pathlib import Path as _P
 
@@ -789,10 +789,14 @@ def _collector_state() -> dict:
         }
     try:
         con = _sql.connect(str(p), timeout=2.0)
+        # `full=1` returns every window (for offline export); the default 200
+        # keeps the dashboard payload small. Stats are always over the full
+        # sample regardless (see aggregate query below).
+        limit_clause = "" if full else " LIMIT 200"
         rows = con.execute(
             "SELECT condition_id, market_slug, snap_ts, book_favored, spot_bps, "
             "spot_favored, winner, resolved_ts, status, hit_book, hit_gate "
-            "FROM collector_windows ORDER BY snap_ts DESC LIMIT 200"
+            "FROM collector_windows ORDER BY snap_ts DESC" + limit_clause
         ).fetchall()
         # Stats are computed over the FULL sample, not the 200-row payload tail
         # (the collector is meant to exceed 200 windows; a tail-limited stat
@@ -856,8 +860,8 @@ def _collector_state() -> dict:
 
 
 @app.get("/api/collector-state")
-def collector_state():
-    return _collector_state()
+def collector_state(full: bool = False):
+    return _collector_state(full=full)
 
 
 

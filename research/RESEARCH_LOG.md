@@ -371,3 +371,20 @@ keeps trading on the 0.80–0.90 band analysis.
 
 **Verdict.** LIVE (governance) — no research conclusion changed; the experiment
 is closed cleanly.
+
+### `/api/collector-state?full=1` — complete per-window export
+
+**Method.** The default `/api/collector-state` payload was `LIMIT 200` windows,
+so only 200 of the ~316 forward-test detail rows were reachable for offline
+analysis. Added an opt-in `full` query param to `_collector_state()` (default
+off, so the dashboard keeps its small payload); `full=1` drops the limit and
+returns every `collector_windows` row. Stats were already computed over the full
+table, independent of the payload limit, so the verdict numbers are unchanged by
+this toggle.
+
+**Result.** `curl ".../api/collector-state?full=1"` now returns all 316 rows.
+Pulled into `exports/collector_state_full_live.json` for offline verification of
+the verdict (every window independently reconcilable against `stats`).
+
+**Verdict.** LIVE (UX/integrity) — closes the last gap in making the forward
+sample fully exportable.
